@@ -1,0 +1,215 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-success: var(--success);
+  --color-info: var(--info);
+  --color-warning: var(--warning);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-accent-soft: var(--accent-soft);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+/* Light — paper + ink. A quiet, cool-neutral surface with a scholarly indigo
+   accent (not the oxblood of a fiction library — this app lives on a desk,
+   not a shelf). */
+:root {
+  --radius: 0.625rem;
+  --background: oklch(0.98 0.002 260);
+  --foreground: oklch(0.22 0.010 260);
+  --card: oklch(0.995 0.001 260);
+  --card-foreground: oklch(0.22 0.010 260);
+  --popover: oklch(0.995 0.001 260);
+  --popover-foreground: oklch(0.22 0.010 260);
+  --primary: oklch(0.40 0.09 264);
+  --primary-foreground: oklch(0.98 0.004 260);
+  --secondary: oklch(0.94 0.003 260);
+  --secondary-foreground: oklch(0.28 0.010 260);
+  --muted: oklch(0.94 0.003 260);
+  --muted-foreground: oklch(0.50 0.008 260);
+  --accent: oklch(0.93 0.010 250);
+  --accent-foreground: oklch(0.25 0.010 260);
+  --destructive: oklch(0.55 0.21 30);
+  --success: oklch(0.52 0.10 155);
+  --info: oklch(0.50 0.09 245);
+  --warning: oklch(0.58 0.12 70);
+  --border: oklch(0.90 0.004 260);
+  --input: oklch(0.88 0.004 260);
+  --ring: oklch(0.40 0.09 264);
+  --chart-accent: oklch(0.46 0.11 264);
+  --accent-soft: oklch(0.40 0.09 264 / 0.12);
+}
+
+/* Dark — near-neutral slate with the same quiet indigo accent, lifted for contrast. */
+.dark {
+  --background: oklch(0.16 0.004 260);
+  --foreground: oklch(0.955 0.004 260);
+  --card: oklch(0.21 0.006 260);
+  --card-foreground: oklch(0.955 0.004 260);
+  --popover: oklch(0.21 0.006 260);
+  --popover-foreground: oklch(0.955 0.004 260);
+  --primary: oklch(0.68 0.10 264);
+  --primary-foreground: oklch(0.16 0.01 260);
+  --secondary: oklch(0.265 0.006 260);
+  --secondary-foreground: oklch(0.955 0.004 260);
+  --muted: oklch(0.265 0.006 260);
+  --muted-foreground: oklch(0.74 0.008 260);
+  --accent: oklch(0.265 0.006 260);
+  --accent-foreground: oklch(0.955 0.004 260);
+  --destructive: oklch(0.70 0.19 28);
+  --success: oklch(0.72 0.10 155);
+  --info: oklch(0.72 0.09 245);
+  --warning: oklch(0.78 0.11 75);
+  --border: oklch(0.95 0.008 260 / 16%);
+  --input: oklch(0.95 0.008 260 / 20%);
+  --ring: oklch(0.68 0.10 264);
+  --chart-accent: oklch(0.68 0.10 264);
+  --accent-soft: oklch(0.68 0.10 264 / 0.16);
+}
+
+/* Black — true-black OLED theme, same ink identity. Applied alongside .dark. */
+.theme-black {
+  --background: oklch(0 0 0);
+  --card: oklch(0.145 0.004 260);
+  --popover: oklch(0.145 0.004 260);
+  --secondary: oklch(0.20 0.005 260);
+  --muted: oklch(0.20 0.005 260);
+  --accent: oklch(0.20 0.005 260);
+  --primary: oklch(0.70 0.10 264);
+  --ring: oklch(0.70 0.10 264);
+  --chart-accent: oklch(0.70 0.10 264);
+  --accent-soft: oklch(0.70 0.10 264 / 0.18);
+  --border: oklch(1 0 0 / 17%);
+  --input: oklch(1 0 0 / 21%);
+}
+
+/* Amber — warm parchment, light. The reading-desk-lamp counterpart to Light. */
+.theme-amber {
+  --background: oklch(0.972 0.009 70);
+  --foreground: oklch(0.17 0.022 52);
+  --card: oklch(0.998 0.002 70);
+  --card-foreground: oklch(0.17 0.022 52);
+  --popover: oklch(0.998 0.002 70);
+  --popover-foreground: oklch(0.17 0.022 52);
+  --primary: oklch(0.48 0.10 264);
+  --primary-foreground: oklch(0.99 0.003 70);
+  --secondary: oklch(0.935 0.012 70);
+  --secondary-foreground: oklch(0.30 0.02 52);
+  --muted: oklch(0.935 0.01 70);
+  --muted-foreground: oklch(0.47 0.022 52);
+  --accent: oklch(0.925 0.018 52);
+  --accent-foreground: oklch(0.24 0.022 52);
+  --destructive: oklch(0.55 0.2 25);
+  --success: oklch(0.51 0.10 150);
+  --info: oklch(0.50 0.085 245);
+  --warning: oklch(0.56 0.13 65);
+  --border: oklch(0.89 0.012 70);
+  --input: oklch(0.87 0.013 70);
+  --ring: oklch(0.48 0.10 264);
+  --chart-accent: oklch(0.48 0.11 264);
+  --accent-soft: oklch(0.48 0.10 264 / 0.12);
+}
+
+/* Ember — warm espresso dark, the counterpart to Amber. Applied alongside .dark. */
+.theme-ember {
+  --background: oklch(0.175 0.012 60);
+  --card: oklch(0.225 0.014 60);
+  --popover: oklch(0.225 0.014 60);
+  --secondary: oklch(0.28 0.015 60);
+  --muted: oklch(0.28 0.015 60);
+  --accent: oklch(0.28 0.015 60);
+  --muted-foreground: oklch(0.74 0.015 70);
+  --primary: oklch(0.70 0.10 264);
+  --ring: oklch(0.70 0.10 264);
+  --chart-accent: oklch(0.70 0.10 264);
+  --accent-soft: oklch(0.70 0.10 264 / 0.16);
+  --border: oklch(0.95 0.015 60 / 16%);
+  --input: oklch(0.95 0.015 60 / 20%);
+}
+
+/* Card stagger entrance animation */
+@keyframes card-appear {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-card-appear {
+  animation: card-appear 0.25s ease-out both;
+}
+
+/* Animated loading ellipsis — three dots pulsing in sequence */
+@keyframes dot-pulse { 0%, 80%, 100% { opacity: 0.25; } 40% { opacity: 1; } }
+.dots-anim > span { animation: dot-pulse 1.2s infinite; }
+.dots-anim > span:nth-child(2) { animation-delay: 0.15s; }
+.dots-anim > span:nth-child(3) { animation-delay: 0.3s; }
+@media (prefers-reduced-motion: reduce) { .dots-anim > span { animation: none; } }
+
+/* Wordmark icon — gentle lift-and-settle on hover */
+@keyframes logo-bob {
+  0%   { transform: translateY(0); }
+  45%  { transform: translateY(-3px); }
+  70%  { transform: translateY(1px); }
+  100% { transform: translateY(0); }
+}
+.group:hover .logo-bob { animation: logo-bob 0.5s ease-in-out; }
+@media (prefers-reduced-motion: reduce) { .group:hover .logo-bob { animation: none; } }
+
+/* iOS-style spring curve, used for small interactive transforms */
+:root {
+  --spring: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.touch-feedback {
+  transition: transform 0.2s var(--spring);
+}
+.touch-feedback:active {
+  transform: scale(0.97);
+}
+
+* {
+  box-sizing: border-box;
+  border-color: var(--border);
+}
+
+/* Hide number input spinners */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] { -moz-appearance: textfield; }
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Display face — a touch more editorial weight for headings and titles.
+   UI chrome (buttons, labels, badges) stays on the system sans. */
+h1, h2, h3, .font-display {
+  font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+  letter-spacing: -0.01em;
+  font-weight: 600;
+}
