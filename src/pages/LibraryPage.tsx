@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { FolderPlus, FolderOpen, Folder, Library as LibraryIcon, ChevronRight, Quote, RefreshCw } from 'lucide-react'
 import { AppShell } from '@/components/AppShell'
 import { DocumentCard } from '@/components/DocumentCard'
@@ -12,6 +12,11 @@ import { MAX_THUMB_ATTEMPTS } from '@/lib/types'
 import type { Document } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
+// Survives this page unmounting (opening a document) so we can drop the
+// reader back where they were on return. Module-scoped, so it persists
+// across route changes within the session but resets on a full reload.
+let savedLibraryScroll = 0
+
 export function LibraryPage() {
   const { documents, folders, loading, scanning, progress, addFolder, retryThumbnails } = useLibrary()
   const { query } = useLibrarySearch()
@@ -24,6 +29,31 @@ export function LibraryPage() {
   useEffect(() => {
     setCurrentDir('')
   }, [activeCollection])
+
+  // Remember where we were scrolled to when leaving (opening a document,
+  // etc.) so coming back to the library drops the reader back in place
+  // instead of resetting to the top.
+  useEffect(() => {
+    const el = document.getElementById('app-main')
+    if (!el) return
+    const onScroll = () => {
+      savedLibraryScroll = el.scrollTop
+    }
+    el.addEventListener('scroll', onScroll, { passive: true })
+    return () => el.removeEventListener('scroll', onScroll)
+  }, [])
+
+  // Restore that position once the grid is actually populated — restoring
+  // any earlier would land in the wrong place while it's still short.
+  const restoredScrollRef = useRef(false)
+  useLayoutEffect(() => {
+    if (!loading && !restoredScrollRef.current) {
+      restoredScrollRef.current = true
+      if (savedLibraryScroll > 0) {
+        document.getElementById('app-main')?.scrollTo(0, savedLibraryScroll)
+      }
+    }
+  }, [loading])
 
   async function handleAddFolder() {
     try {

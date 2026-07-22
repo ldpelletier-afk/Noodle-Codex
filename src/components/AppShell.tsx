@@ -49,7 +49,7 @@ export function AppShell({ children, actions }: { children: ReactNode; actions?:
       />
       <div className="flex flex-1 overflow-hidden">
         <Sidebar mobileOpen={mobileSidebarOpen} onMobileClose={() => setMobileSidebarOpen(false)} />
-        <main className="flex-1 overflow-y-auto min-w-0">{children}</main>
+        <main id="app-main" className="flex-1 overflow-y-auto min-w-0">{children}</main>
       </div>
     </div>
   )
