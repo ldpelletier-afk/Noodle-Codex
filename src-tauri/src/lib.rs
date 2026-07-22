@@ -35,6 +35,10 @@ pub fn run() {
                 watch::start_all(app.handle().clone(), &conn);
             }
 
+            // Heal any thumbnail records left dangling by an external cache
+            // wipe (e.g. a "clear caches" tool), then regenerate them.
+            commands::spawn_startup_thumbnail_recovery(app.handle().clone());
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

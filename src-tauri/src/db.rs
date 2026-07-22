@@ -363,6 +363,28 @@ pub fn reset_thumb_attempts(conn: &Connection, folder_path: &str) -> rusqlite::R
     Ok(())
 }
 
+/// All (id, thumbnail_path) pairs for documents that currently have a
+/// recorded thumbnail — used at startup to detect and heal a cache that was
+/// wiped out from under the app (e.g. by an external "clear caches" tool).
+pub fn all_thumbnail_paths(conn: &Connection) -> rusqlite::Result<Vec<(String, String)>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, thumbnail_path FROM documents WHERE thumbnail_path IS NOT NULL AND thumbnail_path != ''",
+    )?;
+    let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+    rows.collect()
+}
+
+/// Clears a document's recorded thumbnail (and failure counter) so it becomes
+/// eligible for `documents_missing_thumbnails` again — used when the cached
+/// file has vanished from disk out from under the database record.
+pub fn clear_thumbnail(conn: &Connection, id: &str) -> rusqlite::Result<()> {
+    conn.execute(
+        "UPDATE documents SET thumbnail_path = NULL, thumb_attempts = 0 WHERE id = ?1",
+        params![id],
+    )?;
+    Ok(())
+}
+
 fn row_to_document(r: &rusqlite::Row) -> rusqlite::Result<Document> {
     Ok(Document {
         id: r.get(0)?,

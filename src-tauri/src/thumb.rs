@@ -40,13 +40,13 @@ impl ThumbOutcome {
     }
 }
 
-/// Directory where first-page thumbnails are cached, one PNG per document id.
-pub fn thumbnails_dir(cache_root: &Path) -> PathBuf {
-    cache_root.join("thumbnails")
+/// Directory where first-page thumbnails are stored, one PNG per document id.
+pub fn thumbnails_dir(thumbnails_root: &Path) -> PathBuf {
+    thumbnails_root.join("thumbnails")
 }
 
-fn thumb_path(cache_root: &Path, id: &str) -> PathBuf {
-    thumbnails_dir(cache_root).join(format!("{id}.png"))
+fn thumb_path(thumbnails_root: &Path, id: &str) -> PathBuf {
+    thumbnails_dir(thumbnails_root).join(format!("{id}.png"))
 }
 
 /// Returns true when a usable cached thumbnail already exists and is at least
@@ -68,13 +68,13 @@ fn is_cache_fresh(thumb: &Path, pdf: &Path) -> bool {
 /// (`qlmanage`), which needs no extra dependencies. Retries a couple of times
 /// on transient failure, but bails immediately if qlmanage hangs (a hang means
 /// the PDF is unsupported and won't render on a retry either).
-pub fn generate(cache_root: &Path, id: &str, pdf: &Path, size: u32) -> ThumbOutcome {
-    let final_path = thumb_path(cache_root, id);
+pub fn generate(thumbnails_root: &Path, id: &str, pdf: &Path, size: u32) -> ThumbOutcome {
+    let final_path = thumb_path(thumbnails_root, id);
     if is_cache_fresh(&final_path, pdf) {
         return ThumbOutcome::Rendered(final_path);
     }
 
-    let dir = thumbnails_dir(cache_root);
+    let dir = thumbnails_dir(thumbnails_root);
     if std::fs::create_dir_all(&dir).is_err() {
         return ThumbOutcome::Failed;
     }

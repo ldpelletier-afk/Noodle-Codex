@@ -22,10 +22,10 @@ fn active_thumbnail_jobs() -> &'static Mutex<HashSet<String>> {
     JOBS.get_or_init(|| Mutex::new(HashSet::new()))
 }
 
-/// Resolves the SQLite file path and thumbnail cache root for this app.
+/// Resolves the SQLite file path and thumbnail storage root for this app.
 pub struct AppPaths {
     pub db_file: PathBuf,
-    pub cache_root: PathBuf,
+    pub thumbnails_root: PathBuf,
 }
 
 pub fn app_paths(app: &AppHandle) -> Result<AppPaths, String> {
@@ -33,15 +33,15 @@ pub fn app_paths(app: &AppHandle) -> Result<AppPaths, String> {
         .path()
         .app_data_dir()
         .map_err(|e| format!("no app data dir: {e}"))?;
-    let cache_root = app
-        .path()
-        .app_cache_dir()
-        .map_err(|e| format!("no app cache dir: {e}"))?;
     std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
-    std::fs::create_dir_all(&cache_root).map_err(|e| e.to_string())?;
+    // Thumbnails live under Application Support (durable), not Caches — the
+    // OS and cache-cleaning tools treat ~/Library/Caches as freely
+    // disposable, and losing thousands of rendered first pages that way is
+    // exactly the kind of surprise this app shouldn't spring on someone.
+    let thumbnails_root = data_dir.clone();
     Ok(AppPaths {
         db_file: data_dir.join("codex.db"),
-        cache_root,
+        thumbnails_root,
     })
 }
 
@@ -601,7 +601,7 @@ fn run_thumbnail_pass(app: &AppHandle, folder_path: &str, total: u32) {
 
     for (i, (id, pdf_path)) in pending.iter().enumerate() {
         let pdf = PathBuf::from(pdf_path);
-        match thumb::generate(&paths.cache_root, id, &pdf, THUMB_SIZE) {
+        match thumb::generate(&paths.thumbnails_root, id, &pdf, THUMB_SIZE) {
             thumb::ThumbOutcome::Rendered(thumb) => {
                 let thumb_str = thumb.to_string_lossy().to_string();
                 let _ = db::set_thumbnail(&conn, id, &thumb_str);
@@ -640,6 +640,54 @@ fn run_thumbnail_pass(app: &AppHandle, folder_path: &str, total: u32) {
             },
         );
     }
+}
+
+/// Clears the recorded thumbnail for any document whose cached file no longer
+/// exists on disk (e.g. an external cache-clearing tool wiped it), so it
+/// becomes eligible for regeneration again. Returns how many were reset.
+pub(crate) fn reconcile_missing_thumbnails(conn: &rusqlite::Connection) -> usize {
+    let Ok(paths) = db::all_thumbnail_paths(conn) else {
+        return 0;
+    };
+    let mut cleared = 0;
+    for (id, thumb_path) in paths {
+        if !Path::new(&thumb_path).is_file() {
+            if db::clear_thumbnail(conn, &id).is_ok() {
+                cleared += 1;
+            }
+        }
+    }
+    cleared
+}
+
+/// Runs once at startup: clears any thumbnail records whose cached file is
+/// gone, then kicks off regeneration for every folder that needs it. Runs in
+/// the background so it never blocks startup; best-effort throughout.
+pub(crate) fn spawn_startup_thumbnail_recovery(app: AppHandle) {
+    std::thread::spawn(move || {
+        let Ok(paths) = app_paths(&app) else { return };
+        let Ok(conn) = rusqlite::Connection::open(&paths.db_file) else {
+            return;
+        };
+        let _ = db::configure(&conn);
+
+        let cleared = reconcile_missing_thumbnails(&conn);
+        if cleared == 0 {
+            return;
+        }
+
+        let Ok(folders) = db::list_folders(&conn) else {
+            return;
+        };
+        for f in folders {
+            let missing = db::documents_missing_thumbnails(&conn, &f.path)
+                .map(|v| v.len() as u32)
+                .unwrap_or(0);
+            if missing > 0 {
+                spawn_thumbnail_job(app.clone(), f.path.clone(), missing);
+            }
+        }
+    });
 }
 
 #[derive(Serialize, Clone)]
@@ -748,8 +796,39 @@ fn status_state(
     }
 }
 
+/// Builds the AppleScript that opens `path` in Skim (or brings it forward if
+/// already open there) and jumps to `page`. Setting the page is wrapped in
+/// its own `try` so a bad page number (or anything else about the jump)
+/// can't stop the document from opening — the caller only needs to know
+/// whether Skim accepted the open itself.
+fn skim_open_at_page_script(path: &str, page: u32) -> String {
+    let escaped = path.replace('\\', "\\\\").replace('"', "\\\"");
+    format!(
+        r#"tell application "Skim"
+    activate
+    set theDoc to open POSIX file "{escaped}"
+    try
+        set current page of theDoc to (page {page} of theDoc)
+    end try
+end tell"#
+    )
+}
+
+/// Opens `path` in Skim at `page` via AppleScript. Returns false if Skim
+/// isn't installed/scriptable or the open itself fails, so the caller can
+/// fall back to the plain opener.
+fn open_in_skim_at_page(path: &str, page: u32) -> bool {
+    std::process::Command::new("osascript")
+        .arg("-e")
+        .arg(skim_open_at_page_script(path, page))
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
 /// Opens the PDF in Skim, if it's installed — a consistent reading
-/// experience Codex can eventually hook into for in-app tracking. Falls
+/// experience Codex can eventually hook into for in-app tracking. When
+/// there's a saved reading position, jumps straight to that page. Falls
 /// back to the system default viewer when Skim isn't available. Logs the
 /// open as reading activity and, for an unread document, marks it as started.
 #[tauri::command]
@@ -760,11 +839,16 @@ pub fn open_document(app: AppHandle, db: State<'_, Db>, id: String) -> Result<Do
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Document not found".to_string())?;
 
-    let opener = app.opener();
-    if opener.open_path(&doc.path, Some("Skim")).is_err() {
-        opener
-            .open_path(&doc.path, None::<&str>)
-            .map_err(|e| e.to_string())?;
+    let jumped = doc.current_page > 0
+        && doc.page_count > 0
+        && open_in_skim_at_page(&doc.path, doc.current_page.min(doc.page_count));
+    if !jumped {
+        let opener = app.opener();
+        if opener.open_path(&doc.path, Some("Skim")).is_err() {
+            opener
+                .open_path(&doc.path, None::<&str>)
+                .map_err(|e| e.to_string())?;
+        }
     }
 
     let now = now_iso();
@@ -1094,7 +1178,7 @@ pub struct UpdateDocumentInput {
 /// carries the cached thumbnail over to the new id. Pure filesystem logic,
 /// no DB/Tauri context, so it's directly unit-testable.
 fn perform_document_edit(
-    cache_root: &Path,
+    thumbnails_root: &Path,
     existing: &Document,
     input: UpdateDocumentInput,
 ) -> Result<(Document, Option<String>), String> {
@@ -1138,16 +1222,16 @@ fn perform_document_edit(
         thumbnail_path = match &existing.thumbnail_path {
             Some(old_thumb) => {
                 let old_thumb_path = PathBuf::from(old_thumb);
-                let new_thumb_path = thumb::thumbnails_dir(cache_root).join(format!("{new_id}.png"));
+                let new_thumb_path = thumb::thumbnails_dir(thumbnails_root).join(format!("{new_id}.png"));
                 if std::fs::rename(&old_thumb_path, &new_thumb_path).is_ok() {
                     Some(new_thumb_path.to_string_lossy().to_string())
                 } else {
-                    thumb::generate(cache_root, &new_id, &final_path, THUMB_SIZE)
+                    thumb::generate(thumbnails_root, &new_id, &final_path, THUMB_SIZE)
                         .rendered_path()
                         .map(|p| p.to_string_lossy().to_string())
                 }
             }
-            None => thumb::generate(cache_root, &new_id, &final_path, THUMB_SIZE)
+            None => thumb::generate(thumbnails_root, &new_id, &final_path, THUMB_SIZE)
                 .rendered_path()
                 .map(|p| p.to_string_lossy().to_string()),
         };
@@ -1219,7 +1303,7 @@ pub fn update_document(
         .ok_or_else(|| "Document not found".to_string())?;
 
     let paths = app_paths(&app)?;
-    let (updated, pdf_warning) = perform_document_edit(&paths.cache_root, &existing, input)?;
+    let (updated, pdf_warning) = perform_document_edit(&paths.thumbnails_root, &existing, input)?;
 
     if updated.id != existing.id {
         // Insert the new row first, then carry reading history over to it, then
@@ -1456,6 +1540,47 @@ mod tests {
         let still_present: HashSet<String> = ["/lib/a.pdf".to_string()].into_iter().collect();
         assert_eq!(prune_missing_documents(&conn, "/lib", &still_present), 0);
         assert!(db::get_document(&conn, &doc.id).unwrap().is_some());
+    }
+
+    #[test]
+    fn reconcile_missing_thumbnails_clears_only_vanished_files() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        db::migrate(&conn).unwrap();
+        db::add_folder(&conn, "/lib", "lib", "2026-01-01T00:00:00Z").unwrap();
+
+        let base = std::env::temp_dir().join(format!("codex_reconcile_thumbs_test_{}", std::process::id()));
+        std::fs::create_dir_all(&base).unwrap();
+        let present_thumb = base.join("present.png");
+        std::fs::write(&present_thumb, b"fake png bytes").unwrap();
+        let missing_thumb = base.join("missing.png"); // never created
+
+        let mut present = build_document(Path::new("/lib/present.pdf"), "/lib", "lib");
+        present.id = "present".to_string();
+        present.thumbnail_path = Some(present_thumb.to_string_lossy().to_string());
+        let mut missing = build_document(Path::new("/lib/missing.pdf"), "/lib", "lib");
+        missing.id = "missing".to_string();
+        missing.thumbnail_path = Some(missing_thumb.to_string_lossy().to_string());
+        let mut untouched = build_document(Path::new("/lib/untouched.pdf"), "/lib", "lib");
+        untouched.id = "untouched".to_string();
+        untouched.thumbnail_path = None;
+        db::upsert_document(&conn, &present).unwrap();
+        db::upsert_document(&conn, &missing).unwrap();
+        db::upsert_document(&conn, &untouched).unwrap();
+
+        let cleared = reconcile_missing_thumbnails(&conn);
+        assert_eq!(cleared, 1, "only the record whose file is gone should be cleared");
+
+        let present_after = db::get_document(&conn, "present").unwrap().unwrap();
+        assert_eq!(present_after.thumbnail_path.as_deref(), Some(present_thumb.to_string_lossy().as_ref()));
+
+        let missing_after = db::get_document(&conn, "missing").unwrap().unwrap();
+        assert_eq!(missing_after.thumbnail_path, None, "stale path should be cleared so it's eligible for regen");
+        assert_eq!(missing_after.thumb_attempts, 0);
+
+        // A second pass is idempotent: nothing left to clear.
+        assert_eq!(reconcile_missing_thumbnails(&conn), 0);
+
+        std::fs::remove_dir_all(&base).ok();
     }
 
     #[test]
@@ -1811,6 +1936,20 @@ mod tests {
         assert!(detect_folder_overlap(&existing, Path::new("/lib/Thesis")).is_none());
         // Unrelated sibling folder: no overlap.
         assert!(detect_folder_overlap(&existing, Path::new("/lib/OtherStuff")).is_none());
+    }
+
+    #[test]
+    fn skim_open_at_page_script_escapes_the_path_and_targets_the_right_page() {
+        let script = skim_open_at_page_script(r#"/tmp/weird "quote" \path.pdf"#, 7);
+        assert!(
+            script.contains(r#"open POSIX file "/tmp/weird \"quote\" \\path.pdf""#),
+            "quotes and backslashes in the path must be escaped for the AppleScript string literal: {script}"
+        );
+        assert!(script.contains("page 7 of theDoc"));
+        assert!(
+            script.contains("try"),
+            "setting the page must be wrapped in try so a bad page can't block the open"
+        );
     }
 
     fn bib_doc(title: &str, authors: &[&str], year: Option<i32>) -> Document {
