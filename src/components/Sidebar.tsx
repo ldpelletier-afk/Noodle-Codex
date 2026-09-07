@@ -1,37 +1,48 @@
 import { NavLink } from 'react-router-dom'
-import { Library, BarChart3, Settings, X } from 'lucide-react'
+import { Library, BookOpen, BarChart3, Settings, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useLibrary } from '@/contexts/LibraryContext'
 import { CodexMark } from '@/components/CodexMark'
 import { ThemeToggle } from '@/components/ThemeToggle'
 
 const NAV_ITEMS = [
   { to: '/', label: 'Library', icon: Library, end: true },
+  { to: '/reading', label: 'Currently reading', icon: BookOpen, end: false },
   { to: '/stats', label: 'Insights', icon: BarChart3, end: false },
   { to: '/settings', label: 'Settings', icon: Settings, end: false },
 ]
 
 function NavList({ onNavigate }: { onNavigate?: () => void }) {
+  const { documents } = useLibrary()
+  const readingCount = documents.filter(d => d.status === 'in_progress').length
+
   return (
     <nav className="flex flex-col gap-0.5 px-2">
-      {NAV_ITEMS.map(({ to, label, icon: Icon, end }) => (
-        <NavLink
-          key={to}
-          to={to}
-          end={end}
-          onClick={onNavigate}
-          className={({ isActive }) =>
-            cn(
-              'flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm font-medium transition-colors touch-feedback',
-              isActive
-                ? 'bg-primary/10 text-primary'
-                : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-            )
-          }
-        >
-          <Icon className="w-4 h-4 shrink-0" />
-          {label}
-        </NavLink>
-      ))}
+      {NAV_ITEMS.map(({ to, label, icon: Icon, end }) => {
+        const badge = to === '/reading' && readingCount > 0 ? readingCount : null
+        return (
+          <NavLink
+            key={to}
+            to={to}
+            end={end}
+            onClick={onNavigate}
+            className={({ isActive }) =>
+              cn(
+                'flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm font-medium transition-colors touch-feedback',
+                isActive
+                  ? 'bg-primary/10 text-primary'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+              )
+            }
+          >
+            <Icon className="w-4 h-4 shrink-0" />
+            <span className="truncate">{label}</span>
+            {badge !== null && (
+              <span className="ml-auto shrink-0 tabular-nums text-xs opacity-70">{badge}</span>
+            )}
+          </NavLink>
+        )
+      })}
     </nav>
   )
 }

@@ -6,6 +6,7 @@ import { LibrarySearchProvider } from '@/contexts/LibrarySearchContext'
 import { LibraryProvider } from '@/contexts/LibraryContext'
 import { KeyboardShortcutsModal } from '@/components/KeyboardShortcutsModal'
 import { LibraryPage } from '@/pages/LibraryPage'
+import { CurrentlyReadingPage } from '@/pages/CurrentlyReadingPage'
 import { DocumentDetailPage } from '@/pages/DocumentDetailPage'
 import { StatsPage } from '@/pages/StatsPage'
 import { SettingsPage } from '@/pages/SettingsPage'
@@ -34,6 +35,7 @@ function AppRoutes() {
     <>
       <Routes>
         <Route path="/" element={<LibraryPage />} />
+        <Route path="/reading" element={<CurrentlyReadingPage />} />
         <Route path="/documents/:id" element={<DocumentDetailPage />} />
         <Route path="/stats" element={<StatsPage />} />
         <Route path="/settings" element={<SettingsPage />} />
