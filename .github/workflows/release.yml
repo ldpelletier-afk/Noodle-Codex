@@ -1,0 +1,44 @@
+# Builds a universal (Apple Silicon + Intel) macOS release and attaches the
+# .dmg to a draft GitHub Release. Runs when a version tag is pushed
+# (e.g. `git tag v0.2.0 && git push origin v0.2.0`), or by hand from the
+# Actions tab. Publish the draft from the Releases page once it looks right.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - run: npm ci
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          args: --target universal-apple-darwin
+          tagName: ${{ github.ref_type == 'tag' && github.ref_name || 'v__VERSION__' }}
+          releaseName: Codex v__VERSION__
+          releaseBody: Universal build — runs on Apple Silicon and Intel Macs. See the README for first-launch steps.
+          releaseDraft: true
