@@ -176,6 +176,7 @@ export function LibraryPage() {
     <button
       onClick={handleAddFolder}
       disabled={scanning}
+      data-tour="add-folder"
       className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
     >
       <FolderPlus className="w-4 h-4" />
@@ -319,6 +320,7 @@ function FolderView({
               <button
                 key={f.path}
                 onClick={() => onOpenFolder(f.path)}
+                data-tour="folder-tile"
                 className="flex items-center gap-2.5 p-3 rounded-xl border border-border bg-card hover:bg-muted transition-colors text-left animate-card-appear touch-feedback"
               >
                 <Folder className="w-5 h-5 text-primary shrink-0" />

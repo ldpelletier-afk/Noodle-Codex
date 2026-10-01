@@ -11,6 +11,7 @@ import {
   Trash2,
   BookText,
   RefreshCw,
+  Compass,
   type LucideIcon,
 } from 'lucide-react'
 import { AppShell } from '@/components/AppShell'
@@ -21,10 +22,15 @@ import {
   attachBibtex,
   detachBibtex,
   getBibtexStatus,
+  getPdfViewer,
+  isSkimInstalled,
   pickBibtexFile,
   rematchBibtex,
+  setPdfViewer,
+  type PdfViewer,
 } from '@/lib/api'
 import type { BibtexStatus } from '@/lib/types'
+import { TOUR_ENABLED, useTour } from '@/contexts/TourContext'
 import { cn } from '@/lib/utils'
 
 const THEME_ICONS: Record<string, LucideIcon> = {
@@ -52,6 +58,20 @@ export function SettingsPage() {
   const { toast } = useToast()
   const [bibtex, setBibtex] = useState<BibtexStatus | null>(null)
   const [bibBusy, setBibBusy] = useState(false)
+  const [viewer, setViewer] = useState<PdfViewer>(() => getPdfViewer())
+  const [skimInstalled, setSkimInstalled] = useState<boolean | null>(null)
+  const { startTour } = useTour()
+
+  useEffect(() => {
+    isSkimInstalled()
+      .then(setSkimInstalled)
+      .catch(() => setSkimInstalled(false))
+  }, [])
+
+  function selectViewer(v: PdfViewer) {
+    setPdfViewer(v)
+    setViewer(v)
+  }
 
   useEffect(() => {
     getBibtexStatus()
@@ -250,13 +270,57 @@ export function SettingsPage() {
           </div>
         </Section>
 
-        <Section title="Reading tracking">
-          <p className="text-sm text-muted-foreground">
-            In-app reading and annotation (Skim-style) is planned for a later phase. For now,
-            “Open PDF” opens the file in Skim if it's installed, falling back to your system
-            default viewer otherwise.
-          </p>
+        <Section title="Opening PDFs" description="Which app “Open PDF” uses.">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {(
+              [
+                {
+                  id: 'skim',
+                  label: 'Skim',
+                  detail:
+                    skimInstalled === false
+                      ? 'Not installed — your default PDF app is used instead.'
+                      : 'Reopens at the page you left off on.',
+                },
+                {
+                  id: 'system',
+                  label: 'My default PDF app',
+                  detail: 'Preview, Acrobat, or whatever you’ve set in Finder.',
+                },
+              ] as const
+            ).map(opt => {
+              const active = viewer === opt.id
+              return (
+                <button
+                  key={opt.id}
+                  onClick={() => selectViewer(opt.id)}
+                  className={cn(
+                    'flex items-start gap-2 p-3 rounded-xl border transition-colors text-left',
+                    active ? 'border-primary ring-1 ring-primary bg-primary/5' : 'border-border hover:bg-muted'
+                  )}
+                >
+                  <span className="flex-1">
+                    <span className="block text-sm font-medium">{opt.label}</span>
+                    <span className="block text-xs text-muted-foreground mt-0.5">{opt.detail}</span>
+                  </span>
+                  {active && <Check className="w-4 h-4 text-primary shrink-0 mt-0.5" />}
+                </button>
+              )
+            })}
+          </div>
         </Section>
+
+        {TOUR_ENABLED && (
+          <Section title="Walkthrough" description="A quick five-step tour of the basics.">
+            <button
+              onClick={startTour}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-sm font-medium hover:bg-muted transition-colors"
+            >
+              <Compass className="w-4 h-4" />
+              Show walkthrough
+            </button>
+          </Section>
+        )}
       </div>
     </AppShell>
   )

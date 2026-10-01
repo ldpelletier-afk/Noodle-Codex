@@ -52,10 +52,32 @@ export async function retryThumbnails(folderPath: string, force = false): Promis
   return invoke<number>('retry_thumbnails', { folderPath, force })
 }
 
-/** Opens the PDF (in Skim if installed), logs the open as reading activity,
- * and returns the document with its updated reading state. */
+/** Which app "Open PDF" uses: Skim when it's installed (falling back to the
+ * system default otherwise), or always the user's default PDF app. */
+export type PdfViewer = 'skim' | 'system'
+
+const PDF_VIEWER_KEY = 'codex_pdf_viewer'
+
+export function getPdfViewer(): PdfViewer {
+  try {
+    return localStorage.getItem(PDF_VIEWER_KEY) === 'system' ? 'system' : 'skim'
+  } catch {
+    return 'skim'
+  }
+}
+
+export function setPdfViewer(viewer: PdfViewer): void {
+  localStorage.setItem(PDF_VIEWER_KEY, viewer)
+}
+
+export async function isSkimInstalled(): Promise<boolean> {
+  return invoke<boolean>('is_skim_installed')
+}
+
+/** Opens the PDF in the preferred viewer (see `getPdfViewer`), logs the open
+ * as reading activity, and returns the document with its updated reading state. */
 export async function openDocument(id: string): Promise<Document> {
-  return invoke<Document>('open_document', { id })
+  return invoke<Document>('open_document', { id, viewer: getPdfViewer() })
 }
 
 export async function revealInFinder(path: string): Promise<void> {

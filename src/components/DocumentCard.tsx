@@ -17,6 +17,7 @@ export function DocumentCard({ doc, style }: { doc: Document; style?: React.CSSP
     <Link
       to={`/documents/${doc.id}`}
       style={style}
+      data-tour="document-card"
       className="group flex flex-col gap-2 animate-card-appear touch-feedback"
     >
       <div className="relative">

@@ -826,29 +826,56 @@ fn open_in_skim_at_page(path: &str, page: u32) -> bool {
         .unwrap_or(false)
 }
 
-/// Opens the PDF in Skim, if it's installed — a consistent reading
-/// experience Codex can eventually hook into for in-app tracking. When
-/// there's a saved reading position, jumps straight to that page. Falls
-/// back to the system default viewer when Skim isn't available. Logs the
-/// open as reading activity and, for an unread document, marks it as started.
+/// True when Skim is installed. `open -Ra` only looks the app up through
+/// Launch Services — unlike a `tell application "Skim"` AppleScript, it never
+/// pops a "Where is Skim?" chooser on machines that don't have it.
+fn skim_installed() -> bool {
+    std::process::Command::new("open")
+        .args(["-Ra", "Skim"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// Lets the Settings page show whether the Skim option will actually apply.
 #[tauri::command]
-pub fn open_document(app: AppHandle, db: State<'_, Db>, id: String) -> Result<Document, String> {
+pub fn is_skim_installed() -> bool {
+    skim_installed()
+}
+
+/// Opens the PDF and logs the open as reading activity; for an unread
+/// document, also marks it as started. `viewer` picks the app:
+/// - `"skim"` (the default): Skim if it's installed — a consistent reading
+///   experience Codex can eventually hook into for in-app tracking — jumping
+///   straight to the saved page when there is one. Falls back to the system
+///   default viewer when Skim isn't installed.
+/// - `"system"`: always the user's default PDF app (Preview, Acrobat, …).
+#[tauri::command]
+pub fn open_document(
+    app: AppHandle,
+    db: State<'_, Db>,
+    id: String,
+    viewer: Option<String>,
+) -> Result<Document, String> {
     use tauri_plugin_opener::OpenerExt;
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     let doc = db::get_document(&conn, &id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Document not found".to_string())?;
 
-    let jumped = doc.current_page > 0
-        && doc.page_count > 0
-        && open_in_skim_at_page(&doc.path, doc.current_page.min(doc.page_count));
-    if !jumped {
-        let opener = app.opener();
-        if opener.open_path(&doc.path, Some("Skim")).is_err() {
-            opener
-                .open_path(&doc.path, None::<&str>)
-                .map_err(|e| e.to_string())?;
-        }
+    let use_skim = viewer.as_deref() != Some("system") && skim_installed();
+    let opener = app.opener();
+    let has_saved_page = doc.current_page > 0 && doc.page_count > 0;
+    let opened_in_skim = use_skim
+        && ((has_saved_page
+            && open_in_skim_at_page(&doc.path, doc.current_page.min(doc.page_count)))
+            || opener.open_path(&doc.path, Some("Skim")).is_ok());
+    if !opened_in_skim {
+        opener
+            .open_path(&doc.path, None::<&str>)
+            .map_err(|e| e.to_string())?;
     }
 
     let now = now_iso();

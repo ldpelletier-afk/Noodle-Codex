@@ -128,6 +128,7 @@ export function DocumentDetailPage() {
             <div className="flex flex-col gap-2 mt-3">
               <button
                 onClick={handleOpen}
+                data-tour="open-pdf"
                 className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition-opacity"
               >
                 <ExternalLink className="w-3.5 h-3.5" /> Open PDF

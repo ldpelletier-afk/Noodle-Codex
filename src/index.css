@@ -175,6 +175,20 @@
 .group:hover .logo-bob { animation: logo-bob 0.5s ease-in-out; }
 @media (prefers-reduced-motion: reduce) { .group:hover .logo-bob { animation: none; } }
 
+/* Walkthrough arrow — nudges toward its target (direction set via --nudge-x/y) */
+@keyframes tour-nudge {
+  0%, 100% { transform: translate(0, 0); }
+  50%      { transform: translate(var(--nudge-x, 0), var(--nudge-y, 0)); }
+}
+.tour-arrow { animation: tour-nudge 1.1s ease-in-out infinite; }
+/* Pulses the border only — opacity would also flicker the dimming shadow */
+@keyframes tour-ring-pulse {
+  0%, 100% { border-color: var(--primary); }
+  50%      { border-color: color-mix(in oklab, var(--primary) 45%, transparent); }
+}
+.tour-ring { animation: tour-ring-pulse 1.6s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .tour-arrow, .tour-ring { animation: none; } }
+
 /* iOS-style spring curve, used for small interactive transforms */
 :root {
   --spring: cubic-bezier(0.2, 0.8, 0.2, 1);

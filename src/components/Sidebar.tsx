@@ -6,8 +6,8 @@ import { CodexMark } from '@/components/CodexMark'
 import { ThemeToggle } from '@/components/ThemeToggle'
 
 const NAV_ITEMS = [
-  { to: '/', label: 'Library', icon: Library, end: true },
-  { to: '/reading', label: 'Currently reading', icon: BookOpen, end: false },
+  { to: '/', label: 'Library', icon: Library, end: true, tour: 'nav-library' },
+  { to: '/reading', label: 'Currently reading', icon: BookOpen, end: false, tour: 'nav-reading' },
   { to: '/stats', label: 'Insights', icon: BarChart3, end: false },
   { to: '/settings', label: 'Settings', icon: Settings, end: false },
 ]
@@ -18,7 +18,7 @@ function NavList({ onNavigate }: { onNavigate?: () => void }) {
 
   return (
     <nav className="flex flex-col gap-0.5 px-2">
-      {NAV_ITEMS.map(({ to, label, icon: Icon, end }) => {
+      {NAV_ITEMS.map(({ to, label, icon: Icon, end, tour }) => {
         const badge = to === '/reading' && readingCount > 0 ? readingCount : null
         return (
           <NavLink
@@ -26,6 +26,7 @@ function NavList({ onNavigate }: { onNavigate?: () => void }) {
             to={to}
             end={end}
             onClick={onNavigate}
+            data-tour={tour}
             className={({ isActive }) =>
               cn(
                 'flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm font-medium transition-colors touch-feedback',

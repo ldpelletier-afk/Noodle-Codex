@@ -8,7 +8,7 @@ mod watch;
 
 use commands::{
     attach_bibtex, detach_bibtex, export_bibtex, export_bibtex_batch, get_bibtex_status,
-    get_document, list_documents, list_folders, list_reading_events, open_document,
+    get_document, list_documents, list_folders, list_reading_events, open_document, is_skim_installed,
     rematch_bibtex, remove_folder, retry_thumbnails, reveal_in_finder, scan_folder,
     set_reading_progress, set_reading_status, update_document, write_text_file,
 };
@@ -49,6 +49,7 @@ pub fn run() {
             remove_folder,
             retry_thumbnails,
             open_document,
+            is_skim_installed,
             reveal_in_finder,
             attach_bibtex,
             detach_bibtex,

@@ -4,6 +4,7 @@ import { Keyboard } from 'lucide-react'
 import { ToastProvider } from '@/contexts/ToastContext'
 import { LibrarySearchProvider } from '@/contexts/LibrarySearchContext'
 import { LibraryProvider } from '@/contexts/LibraryContext'
+import { TourProvider } from '@/contexts/TourContext'
 import { KeyboardShortcutsModal } from '@/components/KeyboardShortcutsModal'
 import { LibraryPage } from '@/pages/LibraryPage'
 import { CurrentlyReadingPage } from '@/pages/CurrentlyReadingPage'
@@ -61,7 +62,9 @@ function App() {
       <ToastProvider>
         <LibraryProvider>
           <LibrarySearchProvider>
-            <AppRoutes />
+            <TourProvider>
+              <AppRoutes />
+            </TourProvider>
           </LibrarySearchProvider>
         </LibraryProvider>
       </ToastProvider>
