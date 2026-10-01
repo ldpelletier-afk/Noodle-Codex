@@ -826,6 +826,127 @@ fn open_in_skim_at_page(path: &str, page: u32) -> bool {
         .unwrap_or(false)
 }
 
+/// What Skim reports for one document when polled.
+#[derive(Debug, PartialEq)]
+enum SkimPage {
+    Page(u32),
+    /// Skim is running but this document isn't open in it (closed, or not
+    /// loaded yet).
+    NotOpen,
+    /// Skim has quit, or the query failed (e.g. Automation permission denied).
+    Gone,
+}
+
+/// AppleScript returning the 1-based current page of the Skim document at
+/// `path`, or "notopen" / "notrunning". The `is running` check keeps a poll
+/// from relaunching Skim after the reader quits it.
+fn skim_current_page_script(path: &str) -> String {
+    let escaped = path.replace('\\', "\\\\").replace('"', "\\\"");
+    format!(
+        r#"if application "Skim" is running then
+    tell application "Skim"
+        repeat with d in documents
+            try
+                if POSIX path of (file of d as alias) is "{escaped}" then return (index of current page of d) as text
+            end try
+        end repeat
+    end tell
+    return "notopen"
+end if
+return "notrunning""#
+    )
+}
+
+fn parse_skim_page(output: &str) -> SkimPage {
+    match output.trim() {
+        "notopen" => SkimPage::NotOpen,
+        other => other.parse().map(SkimPage::Page).unwrap_or(SkimPage::Gone),
+    }
+}
+
+fn query_skim_page(path: &str) -> SkimPage {
+    match std::process::Command::new("osascript")
+        .arg("-e")
+        .arg(skim_current_page_script(path))
+        .output()
+    {
+        Ok(out) if out.status.success() => parse_skim_page(&String::from_utf8_lossy(&out.stdout)),
+        _ => SkimPage::Gone,
+    }
+}
+
+/// Document ids with a Skim tracker running, so reopening a book that's
+/// already being tracked doesn't start a second poller.
+fn active_skim_trackers() -> &'static Mutex<HashSet<String>> {
+    static TRACKERS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    TRACKERS.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+/// Removes the tracker's id on exit, including on panic.
+struct SkimTrackerGuard(String);
+
+impl Drop for SkimTrackerGuard {
+    fn drop(&mut self) {
+        active_skim_trackers()
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(&self.0);
+    }
+}
+
+const SKIM_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(3);
+/// How long to wait for Skim to finish loading a just-opened document before
+/// concluding it isn't going to show up.
+const SKIM_OPEN_GRACE_POLLS: u32 = 10;
+
+/// Follows a document opened in Skim and saves the page the reader is on as
+/// their progress, until they close it (or quit Skim). Saving on every page
+/// change, rather than only at close, means nothing is lost if Codex quits
+/// first. Each save emits `reading-progress` with the updated document.
+fn spawn_skim_tracker(app: AppHandle, id: String, path: String, saved_page: u32) {
+    if !active_skim_trackers()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .insert(id.clone())
+    {
+        return;
+    }
+    // Skim reports the resolved path; match it even if ours goes via a symlink.
+    let path = std::fs::canonicalize(&path)
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or(path);
+
+    std::thread::spawn(move || {
+        let _guard = SkimTrackerGuard(id.clone());
+        let mut last_page = saved_page;
+        let mut seen = false;
+        let mut misses = 0;
+        loop {
+            std::thread::sleep(SKIM_POLL_INTERVAL);
+            match query_skim_page(&path) {
+                SkimPage::Page(page) => {
+                    seen = true;
+                    if page == last_page {
+                        continue;
+                    }
+                    let db = app.state::<Db>();
+                    let Ok(conn) = db.0.lock() else { return };
+                    match apply_reading_progress(&conn, &id, page) {
+                        Ok(doc) => {
+                            last_page = page;
+                            let _ = app.emit("reading-progress", doc);
+                        }
+                        // The document was removed from the library.
+                        Err(_) => return,
+                    }
+                }
+                SkimPage::NotOpen if !seen && misses < SKIM_OPEN_GRACE_POLLS => misses += 1,
+                SkimPage::NotOpen | SkimPage::Gone => return,
+            }
+        }
+    });
+}
+
 /// True when Skim is installed. `open -Ra` only looks the app up through
 /// Launch Services — unlike a `tell application "Skim"` AppleScript, it never
 /// pops a "Where is Skim?" chooser on machines that don't have it.
@@ -872,7 +993,11 @@ pub fn open_document(
         && ((has_saved_page
             && open_in_skim_at_page(&doc.path, doc.current_page.min(doc.page_count)))
             || opener.open_path(&doc.path, Some("Skim")).is_ok());
-    if !opened_in_skim {
+    // A finished book stays finished: paging back through it to re-read or
+    // look something up shouldn't flip it back to "reading".
+    if opened_in_skim && doc.status != "completed" {
+        spawn_skim_tracker(app.clone(), doc.id.clone(), doc.path.clone(), doc.current_page);
+    } else if !opened_in_skim {
         opener
             .open_path(&doc.path, None::<&str>)
             .map_err(|e| e.to_string())?;
@@ -904,7 +1029,12 @@ pub fn open_document(
 #[tauri::command]
 pub fn set_reading_progress(db: State<'_, Db>, id: String, page: u32) -> Result<Document, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
-    let doc = db::get_document(&conn, &id)
+    apply_reading_progress(&conn, &id, page)
+}
+
+/// Shared by the command above and the Skim tracker.
+fn apply_reading_progress(conn: &rusqlite::Connection, id: &str, page: u32) -> Result<Document, String> {
+    let doc = db::get_document(conn, id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Document not found".to_string())?;
 
@@ -913,8 +1043,8 @@ pub fn set_reading_progress(db: State<'_, Db>, id: String, page: u32) -> Result<
         progress_state(doc.page_count, &doc.started_at, page, &now);
 
     db::set_reading_state(
-        &conn,
-        &id,
+        conn,
+        id,
         &status,
         current_page,
         started_at.as_deref(),
@@ -922,10 +1052,10 @@ pub fn set_reading_progress(db: State<'_, Db>, id: String, page: u32) -> Result<
         Some(&now),
     )
     .map_err(|e| e.to_string())?;
-    db::log_reading_event(&conn, &id, "progress", Some(current_page), &now)
+    db::log_reading_event(conn, id, "progress", Some(current_page), &now)
         .map_err(|e| e.to_string())?;
 
-    db::get_document(&conn, &id)
+    db::get_document(conn, id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Document not found".to_string())
 }
@@ -1963,6 +2093,21 @@ mod tests {
         assert!(detect_folder_overlap(&existing, Path::new("/lib/Thesis")).is_none());
         // Unrelated sibling folder: no overlap.
         assert!(detect_folder_overlap(&existing, Path::new("/lib/OtherStuff")).is_none());
+    }
+
+    #[test]
+    fn skim_current_page_script_escapes_the_path() {
+        let script = skim_current_page_script(r#"/tmp/a "b" \c.pdf"#);
+        assert!(script.contains(r#"is "/tmp/a \"b\" \\c.pdf""#));
+        assert!(script.contains(r#"if application "Skim" is running"#));
+    }
+
+    #[test]
+    fn parse_skim_page_reads_each_outcome() {
+        assert_eq!(parse_skim_page("42\n"), SkimPage::Page(42));
+        assert_eq!(parse_skim_page("notopen\n"), SkimPage::NotOpen);
+        assert_eq!(parse_skim_page("notrunning\n"), SkimPage::Gone);
+        assert_eq!(parse_skim_page(""), SkimPage::Gone);
     }
 
     #[test]

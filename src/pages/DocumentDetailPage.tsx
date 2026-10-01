@@ -4,7 +4,7 @@ import { ArrowLeft, ExternalLink, FolderOpen, FileText, Hash, Quote, BookText, P
 import { AppShell } from '@/components/AppShell'
 import { DocumentEditForm } from '@/components/DocumentEditForm'
 import { ReadingControls } from '@/components/ReadingControls'
-import { getDocument, openDocument, revealInFinder, exportBibtex, updateDocument, thumbnailUrl } from '@/lib/api'
+import { getDocument, onReadingProgress, openDocument, revealInFinder, exportBibtex, updateDocument, thumbnailUrl } from '@/lib/api'
 import { useToast } from '@/contexts/ToastContext'
 import { useLibrary } from '@/contexts/LibraryContext'
 import { formatBytes, formatDate } from '@/lib/utils'
@@ -27,6 +27,16 @@ export function DocumentDetailPage() {
     })
     return () => {
       cancelled = true
+    }
+  }, [id])
+
+  // Page turns saved while reading this book in Skim.
+  useEffect(() => {
+    const unlisten = onReadingProgress(d => {
+      if (d.id === id) setDoc(d)
+    })
+    return () => {
+      unlisten.then(fn => fn())
     }
   }, [id])
 

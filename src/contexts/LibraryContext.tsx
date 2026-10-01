@@ -18,6 +18,7 @@ import {
   onScanProgress,
   onThumbnailReady,
   onLibraryChanged,
+  onReadingProgress,
 } from '@/lib/api'
 import { useToast } from '@/contexts/ToastContext'
 import type { Document, Folder, ReadingEvent, ScanProgress } from '@/lib/types'
@@ -105,13 +106,17 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       refresh()
     })
 
+    // Reading in Skim: Codex saves each page turn as progress.
+    const unlistenReading = onReadingProgress(patchDocument)
+
     return () => {
       mounted.current = false
+      unlistenReading.then(fn => fn())
       unlistenThumb.then(fn => fn())
       unlistenProgress.then(fn => fn())
       unlistenLibraryChanged.then(fn => fn())
     }
-  }, [refresh])
+  }, [refresh, patchDocument])
 
   const addFolder = useCallback(async () => {
     const path = await pickFolder()

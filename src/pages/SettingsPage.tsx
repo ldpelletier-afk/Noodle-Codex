@@ -280,7 +280,7 @@ export function SettingsPage() {
                   detail:
                     skimInstalled === false
                       ? 'Not installed — your default PDF app is used instead.'
-                      : 'Reopens at the page you left off on.',
+                      : 'Saves your page automatically as you read, and reopens there.',
                 },
                 {
                   id: 'system',

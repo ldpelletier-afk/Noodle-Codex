@@ -168,6 +168,11 @@ export function onThumbnailReady(handler: (t: ThumbnailReady) => void): Promise<
   return listen<ThumbnailReady>('thumbnail-ready', e => handler(e.payload))
 }
 
+/** Fired when Codex saves the page you're on while you read in Skim. */
+export function onReadingProgress(handler: (doc: Document) => void): Promise<UnlistenFn> {
+  return listen<Document>('reading-progress', e => handler(e.payload))
+}
+
 /** Fired when the live folder watcher indexes new PDFs dropped into a tracked
  * folder while Codex is running. */
 export function onLibraryChanged(handler: (c: LibraryChanged) => void): Promise<UnlistenFn> {
