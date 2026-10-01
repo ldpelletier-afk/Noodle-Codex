@@ -12,23 +12,43 @@ import { MAX_THUMB_ATTEMPTS } from '@/lib/types'
 import type { Document } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
-// Survives this page unmounting (opening a document) so we can drop the
-// reader back where they were on return. Module-scoped, so it persists
-// across route changes within the session but resets on a full reload.
+// Survive this page unmounting (opening a document) so we can drop the
+// reader back where they were on return — same collection, same subfolder,
+// same scroll. Module-scoped, so they persist across route changes within
+// the session but reset on a full reload.
 let savedLibraryScroll = 0
+let savedCollection = 'all'
+let savedDir = ''
 
 export function LibraryPage() {
   const { documents, folders, loading, scanning, progress, addFolder, retryThumbnails } = useLibrary()
   const { query } = useLibrarySearch()
   const { toast } = useToast()
-  const [activeCollection, setActiveCollection] = useState<string>('all')
-  const [currentDir, setCurrentDir] = useState('')
+  const [activeCollection, setActiveCollection] = useState<string>(savedCollection)
+  const [currentDir, setCurrentDir] = useState(savedDir)
   const [exporting, setExporting] = useState(false)
 
-  // Leaving a collection resets the folder cursor.
+  // Switching to a different collection resets the folder cursor — but not
+  // on mount, which would undo the restored subfolder.
+  const prevCollection = useRef(activeCollection)
   useEffect(() => {
-    setCurrentDir('')
+    if (prevCollection.current !== activeCollection) {
+      prevCollection.current = activeCollection
+      setCurrentDir('')
+    }
   }, [activeCollection])
+
+  useEffect(() => {
+    savedCollection = activeCollection
+    savedDir = currentDir
+  }, [activeCollection, currentDir])
+
+  // A restored collection that's since been removed falls back to "All".
+  useEffect(() => {
+    if (!loading && activeCollection !== 'all' && !folders.some(f => f.path === activeCollection)) {
+      setActiveCollection('all')
+    }
+  }, [loading, folders, activeCollection])
 
   // Remember where we were scrolled to when leaving (opening a document,
   // etc.) so coming back to the library drops the reader back in place

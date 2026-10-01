@@ -190,6 +190,11 @@ pub fn write_info_fields(
     use lopdf::dictionary;
 
     let mut doc = lopdf::Document::load(path).map_err(|e| format!("couldn't open PDF: {e}"))?;
+    // lopdf leaves encrypted objects as-is, so a plain-text Info dictionary
+    // would be "decrypted" into garbage by real readers. Don't touch these.
+    if doc.is_encrypted() {
+        return Err("the PDF is encrypted, so its built-in metadata can't be edited; original left untouched".to_string());
+    }
     let original_pages = doc.get_pages().len();
 
     let info_dict = dictionary! {
@@ -208,6 +213,21 @@ pub fn write_info_fields(
             doc.trailer.set("Info", info_id);
         }
     }
+
+    // lopdf writes every object into one fresh classic xref table, but keeps
+    // the original trailer. Entries describing the old file's layout — /Prev
+    // (earlier incremental-update sections), /XRefStm, and an xref stream's
+    // own /Type /W /Index /Filter… — then point at offsets that no longer
+    // exist, and the output fails to parse ("Invalid file trailer"). Keep
+    // only the entries that describe the document itself.
+    let mut trailer = lopdf::Dictionary::new();
+    for key in [&b"Root"[..], b"Info", b"ID"] {
+        if let Ok(value) = doc.trailer.get(key) {
+            trailer.set(key.to_vec(), value.clone());
+        }
+    }
+    doc.trailer = trailer;
+    doc.reference_table.cross_reference_type = lopdf::xref::XrefType::CrossReferenceTable;
 
     let dir = path.parent().ok_or("PDF has no parent directory")?;
     let tmp_path = dir.join(format!(
@@ -414,6 +434,47 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
+    /// Appends an incremental-update section (as annotators and many readers
+    /// save edits), so the trailer gains a /Prev pointing at the first xref.
+    fn append_incremental_update(path: &Path) {
+        let mut bytes = std::fs::read(path).unwrap();
+        let root = lopdf::Document::load(path).unwrap().trailer.get(b"Root").unwrap().as_reference().unwrap();
+        let text = String::from_utf8_lossy(&bytes).to_string();
+        let start = text.rfind("startxref").unwrap();
+        let prev: usize = text[start + 9..].split_whitespace().next().unwrap().parse().unwrap();
+
+        bytes.extend_from_slice(b"\n");
+        let obj_offset = bytes.len();
+        bytes.extend_from_slice(b"99 0 obj\n(added later)\nendobj\n");
+        let xref_offset = bytes.len();
+        bytes.extend_from_slice(
+            format!(
+                "xref\n0 1\n0000000000 65535 f \n99 1\n{obj_offset:010} 00000 n \n\
+                 trailer\n<< /Size 100 /Root {} {} R /Prev {prev} >>\nstartxref\n{xref_offset}\n%%EOF\n",
+                root.0, root.1
+            )
+            .as_bytes(),
+        );
+        std::fs::write(path, bytes).unwrap();
+    }
+
+    #[test]
+    fn write_info_fields_handles_incrementally_updated_pdfs() {
+        let dir = std::env::temp_dir().join(format!("codex_incr_test_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let pdf = dir.join("Doc.pdf");
+        build_test_pdf(&pdf, "Old Title", "Old Author", "", "", "D:20200101000000Z");
+        append_incremental_update(&pdf);
+        assert!(lopdf::Document::load(&pdf).unwrap().trailer.has(b"Prev"));
+
+        write_info_fields(&pdf, "New Title", "New Author", "", "").unwrap();
+
+        let meta = extract_meta(&pdf);
+        assert_eq!(meta.title.as_deref(), Some("New Title"));
+        assert_eq!(meta.page_count, 1);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     #[test]
     fn write_info_fields_rejects_missing_file_without_side_effects() {
         let dir = std::env::temp_dir().join(format!("codex_write_missing_{}", std::process::id()));
@@ -427,3 +488,4 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 }
+
