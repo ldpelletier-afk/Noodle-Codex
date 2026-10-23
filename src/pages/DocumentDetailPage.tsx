@@ -30,6 +30,21 @@ export function DocumentDetailPage() {
     }
   }, [id])
 
+  // ← goes back to the library, which restores the collection, subfolder,
+  // and scroll position you opened this book from. Ignored while typing
+  // (the edit form, the page field) so it still moves the text cursor.
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key !== 'ArrowLeft' || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return
+      const el = e.target as HTMLElement
+      if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable) return
+      e.preventDefault()
+      navigate('/')
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [navigate])
+
   // Page turns saved while reading this book in Skim.
   useEffect(() => {
     const unlisten = onReadingProgress(d => {

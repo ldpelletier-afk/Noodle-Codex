@@ -2,6 +2,7 @@ import { X } from 'lucide-react'
 
 const SHORTCUTS: [string, string][] = [
   ['/', 'Focus search'],
+  ['←', 'Back to library (on a book)'],
   ['?', 'Toggle this help'],
   ['Esc', 'Close dialogs'],
 ]

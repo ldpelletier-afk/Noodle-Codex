@@ -202,13 +202,18 @@ export function OnboardingTour({
   }, [s, onNext])
 
   useEffect(() => {
+    // Capture phase + stopPropagation: while the tour is up, its keys win
+    // over page shortcuts (e.g. ← on a book's page going back to the library).
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onSkip()
       else if (e.key === 'ArrowRight') onNext()
-      else if (e.key === 'ArrowLeft' && step > 0) onBack()
+      else if (e.key === 'ArrowLeft') {
+        if (step > 0) onBack()
+      } else return
+      e.stopPropagation()
     }
-    window.addEventListener('keydown', handleKey)
-    return () => window.removeEventListener('keydown', handleKey)
+    window.addEventListener('keydown', handleKey, true)
+    return () => window.removeEventListener('keydown', handleKey, true)
   }, [step, onNext, onBack, onSkip])
 
   const placed = rect ? layout(rect, s.side, { w: CARD_WIDTH, h: cardH }) : null
