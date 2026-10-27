@@ -1,7 +1,10 @@
-# TEMPORARY experiment — removed after use. Learns where and how SumatraPDF
+# TEMPORARY experiment (rev 2) — removed after use. Learns where and how SumatraPDF
 # records the page a document was closed on.
 name: Sumatra probe
-on: workflow_dispatch
+on:
+  push:
+    branches: [review-windows]
+    paths: ['.github/workflows/sumatra-probe.yml']
 jobs:
   probe:
     runs-on: windows-latest
