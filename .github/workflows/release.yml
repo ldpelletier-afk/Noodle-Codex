@@ -16,8 +16,33 @@ jobs:
   test:
     uses: ./.github/workflows/test.yml
 
-  build:
+  # One job creates (or finds) the draft release up front, so the parallel
+  # builds below upload into the same release instead of racing to create it.
+  create-release:
     needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      release-id: ${{ steps.release.outputs.id }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          if [ "$GITHUB_REF_TYPE" = tag ]; then TAG="$GITHUB_REF_NAME"; else TAG="v$VERSION"; fi
+          ID=$(gh api "repos/$GITHUB_REPOSITORY/releases" --jq "[.[] | select(.tag_name == \"$TAG\")][0].id // empty")
+          if [ -z "$ID" ]; then
+            ID=$(gh api "repos/$GITHUB_REPOSITORY/releases" \
+              -f tag_name="$TAG" -f target_commitish="$GITHUB_SHA" \
+              -f name="Codex v$VERSION" \
+              -f body="Runs on macOS (Apple Silicon and Intel) and Windows 10/11. See the README for first-launch steps." \
+              -F draft=true --jq .id)
+          fi
+          echo "id=$ID" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: create-release
     strategy:
       fail-fast: false
       matrix:
@@ -52,7 +77,4 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           args: ${{ matrix.args }}
-          tagName: ${{ github.ref_type == 'tag' && github.ref_name || 'v__VERSION__' }}
-          releaseName: Codex v__VERSION__
-          releaseBody: Runs on macOS (Apple Silicon and Intel) and Windows 10/11. See the README for first-launch steps.
-          releaseDraft: true
+          releaseId: ${{ needs.create-release.outputs.release-id }}
