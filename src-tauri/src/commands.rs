@@ -1075,7 +1075,7 @@ fn track_in_sumatra(app: AppHandle, id: String, path: String, settings: PathBuf)
                 if modified < opened_at + SUMATRA_OPEN_SETTLE {
                     continue;
                 }
-                let Some(&page) = pages.get(&path.to_lowercase()) else { continue };
+                let Some(page) = sumatra::page_for(&pages, &path) else { continue };
                 let db = app.state::<Db>();
                 let Ok(conn) = db.0.lock() else { continue };
                 match db::get_document(&conn, &id) {
