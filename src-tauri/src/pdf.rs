@@ -155,18 +155,64 @@ pub fn sanitize_filename(title: &str) -> String {
     let trimmed = collapsed.trim_matches('.').trim();
     let capped: String = trimmed.chars().take(150).collect();
     if capped.is_empty() {
-        "Untitled".to_string()
+        return "Untitled".to_string();
+    }
+    avoid_reserved_name(capped)
+}
+
+/// Windows refuses file names whose part before the first dot is a legacy
+/// device name ("Con", "nul. A study", "COM1"), whatever the extension. Such
+/// titles get an underscore after that part. Applied on every OS so files stay
+/// portable between Mac and Windows.
+fn avoid_reserved_name(stem: String) -> String {
+    const RESERVED: [&str; 22] = [
+        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+        "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    ];
+    let base_len = stem.find('.').unwrap_or(stem.len());
+    let base = stem[..base_len].trim_end().to_ascii_uppercase();
+    if RESERVED.contains(&base.as_str()) {
+        format!("{}_{}", &stem[..base_len], &stem[base_len..])
     } else {
-        capped
+        stem
     }
 }
 
 /// Picks a file path in `dir` named `<stem>.pdf`, or `<stem> (2).pdf`, etc. if
 /// that name is already taken by a *different* file than `except`.
+/// True when `a` and `b` name the same file on disk — including `paper.pdf`
+/// vs `Paper.pdf` on a case-insensitive file system (the macOS and Windows
+/// defaults), so a case-only rename isn't mistaken for a name collision.
+fn same_file(a: &Path, b: &Path) -> bool {
+    if a == b {
+        return true;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        match (std::fs::metadata(a), std::fs::metadata(b)) {
+            (Ok(x), Ok(y)) => x.dev() == y.dev() && x.ino() == y.ino(),
+            _ => false,
+        }
+    }
+    // Windows resolves both to the on-disk path, with its stored letter case.
+    #[cfg(windows)]
+    {
+        match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+            (Ok(x), Ok(y)) => x == y,
+            _ => false,
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        false
+    }
+}
+
 pub fn unique_pdf_path(dir: &Path, stem: &str, except: &Path) -> std::path::PathBuf {
     let mut candidate = dir.join(format!("{stem}.pdf"));
     let mut n = 2;
-    while candidate.exists() && candidate != except {
+    while candidate.exists() && !same_file(&candidate, except) {
         candidate = dir.join(format!("{stem} ({n}).pdf"));
         n += 1;
     }
@@ -402,6 +448,28 @@ mod tests {
         assert_eq!(sanitize_filename("  spaced   out  "), "spaced out");
         assert_eq!(sanitize_filename(""), "Untitled");
         assert_eq!(sanitize_filename("..."), "Untitled");
+    }
+
+    #[test]
+    fn sanitize_filename_avoids_windows_reserved_names() {
+        assert_eq!(sanitize_filename("Con"), "Con_");
+        assert_eq!(sanitize_filename("nul. A Study"), "nul_. A Study");
+        assert_eq!(sanitize_filename("COM1"), "COM1_");
+        // Only the exact device names are reserved.
+        assert_eq!(sanitize_filename("Conscience"), "Conscience");
+        assert_eq!(sanitize_filename("Console Wars"), "Console Wars");
+    }
+
+    #[test]
+    fn unique_pdf_path_allows_a_case_only_rename() {
+        let dir = std::env::temp_dir().join(format!("codex_case_test_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let existing = dir.join("paper.pdf");
+        std::fs::write(&existing, b"%PDF-1.4").unwrap();
+        // On a case-insensitive file system "Paper.pdf" *is* paper.pdf, so it
+        // mustn't be treated as taken; on a case-sensitive one it's free anyway.
+        assert_eq!(unique_pdf_path(&dir, "Paper", &existing), dir.join("Paper.pdf"));
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
