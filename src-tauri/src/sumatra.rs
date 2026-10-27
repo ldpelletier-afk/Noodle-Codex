@@ -161,10 +161,12 @@ SessionData [
         close_sumatra();
 
         let text = std::fs::read_to_string(&settings).expect("Sumatra should have written its settings");
-        let pages = parse_saved_pages(&text);
+        // Look the page up while the file still exists (the lookup may need
+        // to resolve its path on disk), then clean up.
+        let page = page_for(&parse_saved_pages(&text), &pdf_str);
         let _ = std::process::Command::new("taskkill").args(["/F", "/IM", "SumatraPDF.exe"]).output();
         std::fs::remove_dir_all(&dir).ok();
-        assert_eq!(page_for(&pages, &pdf_str), Some(3), "settings: {text}");
+        assert_eq!(page, Some(3), "settings: {text}");
     }
 
     #[test]
