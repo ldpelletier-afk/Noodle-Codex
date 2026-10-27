@@ -11,6 +11,7 @@ import { exportBibtexBatch, pickBibtexSavePath, writeTextFile } from '@/lib/api'
 import { MAX_THUMB_ATTEMPTS } from '@/lib/types'
 import type { Document } from '@/lib/types'
 import { cn } from '@/lib/utils'
+import { baseName } from '@/lib/platform'
 
 // Survive this page unmounting (opening a document) so we can drop the
 // reader back where they were on return — same collection, same subfolder,
@@ -184,7 +185,7 @@ export function LibraryPage() {
       const bib = await exportBibtexBatch(exportScopeDocs.map(d => d.id))
       await writeTextFile(savePath, bib)
       const count = exportScopeDocs.length
-      toast.success(`Exported ${count} entr${count === 1 ? 'y' : 'ies'} to ${savePath.split('/').pop()}`)
+      toast.success(`Exported ${count} entr${count === 1 ? 'y' : 'ies'} to ${baseName(savePath)}`)
     } catch (e) {
       toast.error(`Couldn't export BibTeX: ${e}`)
     } finally {

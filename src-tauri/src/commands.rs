@@ -950,6 +950,12 @@ fn spawn_skim_tracker(app: AppHandle, id: String, path: String, saved_page: u32)
 /// True when Skim is installed. `open -Ra` only looks the app up through
 /// Launch Services — unlike a `tell application "Skim"` AppleScript, it never
 /// pops a "Where is Skim?" chooser on machines that don't have it.
+#[cfg(not(target_os = "macos"))]
+fn skim_installed() -> bool {
+    false // Skim is macOS-only
+}
+
+#[cfg(target_os = "macos")]
 fn skim_installed() -> bool {
     std::process::Command::new("open")
         .args(["-Ra", "Skim"])

@@ -1,7 +1,7 @@
-# Builds a universal (Apple Silicon + Intel) macOS release and attaches the
-# .dmg to a draft GitHub Release. Runs when a version tag is pushed
-# (e.g. `git tag v0.2.0 && git push origin v0.2.0`), or by hand from the
-# Actions tab. Publish the draft from the Releases page once it looks right.
+# Builds Codex for macOS (universal: Apple Silicon + Intel) and Windows, and
+# attaches the installers to a draft GitHub Release. Runs when a version tag
+# is pushed (e.g. `git tag v0.3.0 && git push origin v0.3.0`), or by hand from
+# the Actions tab. Publish the draft from the Releases page once it looks right.
 name: Release
 
 on:
@@ -13,8 +13,22 @@ permissions:
   contents: write
 
 jobs:
-  build-macos:
-    runs-on: macos-latest
+  test:
+    uses: ./.github/workflows/test.yml
+
+  build:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
+            args: --target universal-apple-darwin
+          - platform: windows-latest
+            rust-targets: ''
+            args: ''
+    runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
 
@@ -25,7 +39,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-apple-darwin,x86_64-apple-darwin
+          targets: ${{ matrix.rust-targets }}
 
       - uses: swatinem/rust-cache@v2
         with:
@@ -37,8 +51,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          args: --target universal-apple-darwin
+          args: ${{ matrix.args }}
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || 'v__VERSION__' }}
           releaseName: Codex v__VERSION__
-          releaseBody: Universal build — runs on Apple Silicon and Intel Macs. See the README for first-launch steps.
+          releaseBody: Runs on macOS (Apple Silicon and Intel) and Windows 10/11. See the README for first-launch steps.
           releaseDraft: true

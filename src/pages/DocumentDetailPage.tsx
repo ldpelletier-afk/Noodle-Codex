@@ -8,6 +8,7 @@ import { getDocument, onReadingProgress, openDocument, revealInFinder, exportBib
 import { useToast } from '@/contexts/ToastContext'
 import { useLibrary } from '@/contexts/LibraryContext'
 import { formatBytes, formatDate } from '@/lib/utils'
+import { IS_MAC } from '@/lib/platform'
 import type { Document, UpdateDocumentInput } from '@/lib/types'
 
 export function DocumentDetailPage() {
@@ -162,7 +163,7 @@ export function DocumentDetailPage() {
                 onClick={handleReveal}
                 className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-border text-sm hover:bg-muted transition-colors"
               >
-                <FolderOpen className="w-3.5 h-3.5" /> Reveal in Finder
+                <FolderOpen className="w-3.5 h-3.5" /> {IS_MAC ? 'Reveal in Finder' : 'Show in File Explorer'}
               </button>
               <button
                 onClick={handleCopyBibtex}

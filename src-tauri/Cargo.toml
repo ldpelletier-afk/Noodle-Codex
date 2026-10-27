@@ -31,3 +31,6 @@ walkdir = "2"
 biblatex = "0.10"
 notify = "8.2.0"
 
+# Windows' built-in PDF engine, used for first-page thumbnails.
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.58", features = ["Foundation", "Data_Pdf", "Storage", "Storage_Streams"] }

@@ -1,5 +1,4 @@
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
@@ -7,26 +6,26 @@ use std::time::{Duration, Instant};
 /// two threads render the same document id at the same time.
 static WORK_SEQ: AtomicU64 = AtomicU64::new(0);
 
-/// How many times to ask qlmanage for a thumbnail (per call) before giving up.
-/// Quick Look is flaky when invoked in tight batches, so a couple of retries
-/// meaningfully cut down on blank covers. Only applies to fast failures — a
-/// hang (timeout) is never retried, since it won't fix itself.
+/// How many times to try rendering a thumbnail (per call) before giving up.
+/// Quick Look (macOS) is flaky when invoked in tight batches, so a couple of
+/// retries meaningfully cut down on blank covers. Only applies to fast
+/// failures — a hang (timeout) is never retried, since it won't fix itself.
 const MAX_ATTEMPTS: u32 = 3;
 
-/// Hard ceiling on a single qlmanage invocation. Quick Look hangs indefinitely
-/// on malformed / encrypted / truncated PDFs, which would otherwise freeze the
+/// Hard ceiling on a single render. Quick Look hangs indefinitely on
+/// malformed / encrypted / truncated PDFs, which would otherwise freeze the
 /// whole render job on one bad file. A real first page renders in well under a
 /// second, so this is generous.
-const QL_TIMEOUT: Duration = Duration::from_secs(8);
+const RENDER_TIMEOUT: Duration = Duration::from_secs(8);
 
 /// Outcome of a thumbnail render.
 #[derive(Debug, PartialEq)]
 pub enum ThumbOutcome {
     /// Rendered successfully; the cached PNG is at this path.
     Rendered(PathBuf),
-    /// qlmanage ran but produced no usable thumbnail (often transient).
+    /// The renderer ran but produced no usable thumbnail (often transient).
     Failed,
-    /// qlmanage hung and was killed — the PDF is almost certainly unsupported
+    /// The renderer hung and was abandoned — the PDF is almost certainly unsupported
     /// (encrypted, corrupt, password-protected), so retrying is pointless.
     TimedOut,
 }
@@ -64,9 +63,10 @@ fn is_cache_fresh(thumb: &Path, pdf: &Path) -> bool {
     }
 }
 
-/// Renders the first page of `pdf` to a cached PNG using macOS Quick Look
-/// (`qlmanage`), which needs no extra dependencies. Retries a couple of times
-/// on transient failure, but bails immediately if qlmanage hangs (a hang means
+/// Renders the first page of `pdf` to a cached PNG with the OS's own PDF
+/// engine, so no extra dependencies are needed: Quick Look (`qlmanage`) on
+/// macOS, `Windows.Data.Pdf` on Windows. Retries a couple of times on
+/// transient failure, but bails immediately if a render hangs (a hang means
 /// the PDF is unsupported and won't render on a retry either).
 pub fn generate(thumbnails_root: &Path, id: &str, pdf: &Path, size: u32) -> ThumbOutcome {
     let final_path = thumb_path(thumbnails_root, id);
@@ -94,10 +94,12 @@ pub fn generate(thumbnails_root: &Path, id: &str, pdf: &Path, size: u32) -> Thum
     ThumbOutcome::Failed
 }
 
-/// Runs qlmanage with a hard timeout. Returns whether it exited successfully;
-/// `None` means it hung and was killed.
-fn run_qlmanage_with_timeout(work: &Path, pdf: &Path, size: u32) -> Option<bool> {
-    let mut child = Command::new("qlmanage")
+/// Renders `pdf`'s first page as a PNG somewhere inside `work`, giving up
+/// after `RENDER_TIMEOUT`. Returns whether it succeeded; `None` means it hung.
+#[cfg(target_os = "macos")]
+fn render_into(work: &Path, pdf: &Path, size: u32) -> Option<bool> {
+    // qlmanage writes "<input-filename>.png" into the output dir.
+    let mut child = std::process::Command::new("qlmanage")
         .arg("-t")
         .arg("-s")
         .arg(size.to_string())
@@ -109,7 +111,7 @@ fn run_qlmanage_with_timeout(work: &Path, pdf: &Path, size: u32) -> Option<bool>
         .spawn()
         .ok()?;
 
-    let deadline = Instant::now() + QL_TIMEOUT;
+    let deadline = Instant::now() + RENDER_TIMEOUT;
     loop {
         match child.try_wait() {
             Ok(Some(status)) => return Some(status.success()),
@@ -126,7 +128,66 @@ fn run_qlmanage_with_timeout(work: &Path, pdf: &Path, size: u32) -> Option<bool>
     }
 }
 
-/// A single qlmanage render attempt into a private scratch directory. The
+#[cfg(windows)]
+fn render_into(work: &Path, pdf: &Path, size: u32) -> Option<bool> {
+    // WinRT calls block, so run the render on its own thread and stop waiting
+    // after the timeout. A hung render thread is abandoned (it holds nothing
+    // but its own scratch file).
+    let (tx, rx) = std::sync::mpsc::channel();
+    let (out, pdf) = (work.join("thumb.png"), pdf.to_path_buf());
+    std::thread::spawn(move || {
+        let _ = tx.send(windows_pdf::render_first_page(&pdf, &out, size).is_ok());
+    });
+    match rx.recv_timeout(RENDER_TIMEOUT) {
+        Ok(ok) => Some(ok),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => None,
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Some(false),
+    }
+}
+
+#[cfg(not(any(target_os = "macos", windows)))]
+fn render_into(_work: &Path, _pdf: &Path, _size: u32) -> Option<bool> {
+    Some(false)
+}
+
+/// First-page rendering through Windows' built-in PDF engine
+/// (`Windows.Data.Pdf`, Windows 10+).
+#[cfg(windows)]
+mod windows_pdf {
+    use std::path::Path;
+    use windows::core::{Result, HSTRING};
+    use windows::Data::Pdf::{PdfDocument, PdfPageRenderOptions};
+    use windows::Storage::StorageFile;
+    use windows::Storage::Streams::{DataReader, InMemoryRandomAccessStream};
+
+    /// Writes `pdf`'s first page to `out` as a PNG whose longer side is `size`.
+    pub fn render_first_page(pdf: &Path, out: &Path, size: u32) -> Result<()> {
+        let file = StorageFile::GetFileFromPathAsync(&HSTRING::from(pdf.as_os_str()))?.get()?;
+        let doc = PdfDocument::LoadFromFileAsync(&file)?.get()?;
+        if doc.PageCount()? == 0 {
+            return Err(windows::core::Error::empty());
+        }
+        let page = doc.GetPage(0)?;
+        let dims = page.Size()?;
+        let options = PdfPageRenderOptions::new()?; // PNG by default
+        if dims.Width >= dims.Height {
+            options.SetDestinationWidth(size)?;
+        } else {
+            options.SetDestinationHeight(size)?;
+        }
+
+        let stream = InMemoryRandomAccessStream::new()?;
+        page.RenderWithOptionsToStreamAsync(&stream, &options)?.get()?;
+        let len = stream.Size()? as u32;
+        let reader = DataReader::CreateDataReader(&stream.GetInputStreamAt(0)?)?;
+        reader.LoadAsync(len)?.get()?;
+        let mut bytes = vec![0u8; len as usize];
+        reader.ReadBytes(&mut bytes)?;
+        std::fs::write(out, &bytes).map_err(|_| windows::core::Error::empty())
+    }
+}
+
+/// A single render attempt into a private scratch directory. The
 /// scratch dir is unique per call (process id + a monotonic counter), so
 /// concurrent renders — even of the same document — never clobber each other.
 fn try_generate_once(dir: &Path, final_path: &Path, pdf: &Path, size: u32) -> ThumbOutcome {
@@ -137,7 +198,7 @@ fn try_generate_once(dir: &Path, final_path: &Path, pdf: &Path, size: u32) -> Th
         return ThumbOutcome::Failed;
     }
 
-    let succeeded = match run_qlmanage_with_timeout(&work, pdf, size) {
+    let succeeded = match render_into(&work, pdf, size) {
         Some(ok) => ok,
         None => {
             let _ = std::fs::remove_dir_all(&work);
@@ -145,8 +206,8 @@ fn try_generate_once(dir: &Path, final_path: &Path, pdf: &Path, size: u32) -> Th
         }
     };
 
-    // qlmanage writes "<input-filename>.png" into the output dir; grab whatever
-    // single PNG it produced and move it to the stable <id>.png name.
+    // Grab whatever single PNG the renderer produced and move it to the stable
+    // <id>.png name.
     let mut result = ThumbOutcome::Failed;
     if succeeded {
         if let Ok(entries) = std::fs::read_dir(&work) {
@@ -194,7 +255,9 @@ mod tests {
         crate::pdf::build_test_pdf(&pdf, "Doc", "Author", "Subj", "kw", "D:20200101000000Z");
 
         let out = generate(&cache, "abc123", &pdf, 256);
-        let path = out.rendered_path().expect("qlmanage should produce a thumbnail").to_path_buf();
+        let path = out.rendered_path().expect("the OS renderer should produce a thumbnail").to_path_buf();
+        // A real PNG, not just any bytes.
+        assert_eq!(&std::fs::read(&path).unwrap()[..8], b"\x89PNG\r\n\x1a\n");
         assert!(path.exists());
         assert!(std::fs::metadata(&path).unwrap().len() > 0, "thumbnail not empty");
 
@@ -206,9 +269,10 @@ mod tests {
     }
 
     #[test]
-    fn malformed_pdf_times_out_instead_of_hanging() {
+    fn malformed_pdf_fails_without_hanging() {
         // qlmanage hangs indefinitely on garbage PDFs; the timeout must turn
         // that into a bounded TimedOut rather than freezing the whole job.
+        // (Windows' engine rejects them outright, which is a plain failure.)
         let base = std::env::temp_dir().join(format!("codex_thumb_timeout_{}", std::process::id()));
         let cache = base.join("cache");
         std::fs::create_dir_all(&base).unwrap();
@@ -220,9 +284,11 @@ mod tests {
         let outcome = generate(&cache, "bad", &bad, 128);
         let elapsed = started.elapsed();
 
+        assert!(outcome.rendered_path().is_none(), "garbage must not produce a thumbnail");
+        #[cfg(target_os = "macos")]
         assert_eq!(outcome, ThumbOutcome::TimedOut, "a hanging render should report TimedOut");
-        // One timeout (~8s), not three stacked retries — a hang isn't retried.
-        assert!(elapsed < QL_TIMEOUT * 2, "timed-out render must not be retried: took {elapsed:?}");
+        // At most one timeout (~8s), not three stacked retries — a hang isn't retried.
+        assert!(elapsed < RENDER_TIMEOUT * 2, "render must not be retried after hanging: took {elapsed:?}");
         assert!(!cache.join("thumbnails").join("bad.png").exists());
 
         std::fs::remove_dir_all(&base).ok();

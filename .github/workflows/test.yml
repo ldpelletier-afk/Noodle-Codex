@@ -1,0 +1,34 @@
+# Runs the Rust test suite on Windows — including real first-page thumbnail
+# renders through Windows' PDF engine. (macOS is covered by local runs; Quick
+# Look isn't reliable on headless CI Macs.) Also called by release.yml so a
+# release is only built once these pass.
+name: Test
+
+on:
+  push:
+    branches: ['**']
+  workflow_dispatch:
+  workflow_call:
+
+jobs:
+  test-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      # The Tauri crate embeds the built frontend, so it must exist to compile.
+      - run: npm ci
+      - run: npm run build
+
+      - run: cargo test --manifest-path src-tauri/Cargo.toml
