@@ -53,13 +53,26 @@ pub fn is_relevant_event_kind(kind: &EventKind) -> bool {
     )
 }
 
-/// Resolves symlinks so comparisons are on the real path, falling back to the
-/// input unchanged if it no longer exists (e.g. a file deleted mid-debounce).
-/// Needed because FSEvents reports canonicalized paths — e.g. macOS's own
-/// `/var/folders/...` temp dirs are actually a symlink to `/private/var/...`,
-/// and notify reports the resolved form.
+/// Resolves symlinks so comparisons are on the real path. Needed because
+/// paths reach us in different forms: FSEvents reports canonicalized paths
+/// (macOS's `/var/folders/...` temp dirs are a symlink to `/private/var/...`),
+/// while on Windows notify reports paths as watched (`C:\Users\RUNNER~1\...`)
+/// but canonicalizing yields `\\?\C:\Users\runneradmin\...`.
+///
+/// A path that no longer exists (a file deleted mid-debounce) can't be
+/// canonicalized itself, so its parent is canonicalized instead — otherwise a
+/// deletion's path would never match its folder's canonical form. Falls back
+/// to the input unchanged if neither exists.
 fn canonical_or_self(path: &Path) -> PathBuf {
-    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+    if let Ok(p) = std::fs::canonicalize(path) {
+        return p;
+    }
+    match (path.parent(), path.file_name()) {
+        (Some(parent), Some(name)) => std::fs::canonicalize(parent)
+            .map(|p| p.join(name))
+            .unwrap_or_else(|_| path.to_path_buf()),
+        _ => path.to_path_buf(),
+    }
 }
 
 /// Finds which tracked folder (if any) contains `path`. The longest matching
@@ -273,14 +286,37 @@ mod tests {
 
         let seen = rx.recv_timeout(Duration::from_secs(5));
         assert!(seen.is_ok(), "expected a filesystem event for the new PDF within 5s");
-        // FSEvents reports the canonicalized path (e.g. macOS's temp dir is a
-        // `/var/...` symlink to `/private/var/...`), which is exactly why
-        // `resolve_tracked_folder` canonicalizes before comparing.
-        assert_eq!(seen.unwrap(), canonical_or_self(&new_pdf));
+        // The reported path may be in a different form from ours (macOS:
+        // canonicalized `/private/var/...`; Windows: as watched, possibly
+        // with 8.3 short names), which is exactly why `resolve_tracked_folder`
+        // canonicalizes both sides before comparing.
+        assert_eq!(canonical_or_self(&seen.unwrap()), canonical_or_self(&new_pdf));
 
         std::fs::remove_dir_all(&dir).ok();
     }
 
+    #[test]
+    fn resolve_tracked_folder_matches_a_deleted_file() {
+        // A removal event names a path that no longer exists. It must still
+        // resolve to its folder even when the folder's canonical form differs
+        // from how it was recorded (macOS `/var` vs `/private/var`; Windows
+        // `RUNNER~1` vs `runneradmin` and the `\\?\` prefix).
+        let dir = std::env::temp_dir().join(format!("codex_watch_deleted_test_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let gone = dir.join("deleted.pdf");
+        assert!(!gone.exists());
+
+        let folders = vec![dir.to_string_lossy().to_string()];
+        assert_eq!(
+            resolve_tracked_folder(folders.iter().map(|s| s.as_str()), &gone),
+            Some(dir.to_string_lossy().to_string())
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    // Symlinks need special privileges on Windows, so this only runs elsewhere.
+    #[cfg(unix)]
     #[test]
     fn resolve_tracked_folder_matches_through_a_symlinked_ancestor() {
         // Regression test for the real bug the integration test above caught:
@@ -290,7 +326,6 @@ mod tests {
         let real_dir = base.join("real");
         let link = base.join("link");
         std::fs::create_dir_all(&real_dir).unwrap();
-        #[cfg(unix)]
         std::os::unix::fs::symlink(&real_dir, &link).unwrap();
 
         let folders = vec![link.to_string_lossy().to_string()];
