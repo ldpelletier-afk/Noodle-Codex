@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// Monotonic counter so each render gets its own scratch directory, even when
 /// two threads render the same document id at the same time.
@@ -111,12 +111,12 @@ fn render_into(work: &Path, pdf: &Path, size: u32) -> Option<bool> {
         .spawn()
         .ok()?;
 
-    let deadline = Instant::now() + RENDER_TIMEOUT;
+    let deadline = std::time::Instant::now() + RENDER_TIMEOUT;
     loop {
         match child.try_wait() {
             Ok(Some(status)) => return Some(status.success()),
             Ok(None) => {
-                if Instant::now() >= deadline {
+                if std::time::Instant::now() >= deadline {
                     let _ = child.kill();
                     let _ = child.wait();
                     return None; // hung

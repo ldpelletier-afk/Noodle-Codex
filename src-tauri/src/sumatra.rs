@@ -68,6 +68,25 @@ pub fn parse_saved_pages(settings: &str) -> HashMap<String, u32> {
     pages
 }
 
+/// The page Sumatra recorded for `path`. Windows can spell one file several
+/// ways — case, 8.3 short names (`RUNNER~1`), the `\\?\` prefix — and
+/// Sumatra stores the long form, so when the text doesn't match directly the
+/// paths are compared after resolving them on disk.
+pub fn page_for(pages: &HashMap<String, u32>, path: &str) -> Option<u32> {
+    if let Some(&page) = pages.get(&path.to_lowercase()) {
+        return Some(page);
+    }
+    let target = resolved(path)?;
+    pages.iter().find(|(p, _)| resolved(p).as_ref() == Some(&target)).map(|(_, &page)| page)
+}
+
+/// `path` resolved on disk, lowercased, without Windows' `\\?\` prefix.
+fn resolved(path: &str) -> Option<String> {
+    let full = std::fs::canonicalize(path).ok()?;
+    let full = full.to_string_lossy();
+    Some(full.strip_prefix(r"\\?\").unwrap_or(&full).to_lowercase())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -145,7 +164,23 @@ SessionData [
         let pages = parse_saved_pages(&text);
         let _ = std::process::Command::new("taskkill").args(["/F", "/IM", "SumatraPDF.exe"]).output();
         std::fs::remove_dir_all(&dir).ok();
-        assert_eq!(pages.get(&pdf_str.to_lowercase()), Some(&3), "settings: {text}");
+        assert_eq!(page_for(&pages, &pdf_str), Some(3), "settings: {text}");
+    }
+
+    #[test]
+    fn page_for_matches_the_same_file_spelled_differently() {
+        let dir = std::env::temp_dir().join(format!("codex_sumatra_paths_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("Book.pdf");
+        std::fs::write(&file, b"%PDF-1.4").unwrap();
+        // Sumatra records the fully resolved path…
+        let recorded = resolved(&file.to_string_lossy()).unwrap();
+        let pages = HashMap::from([(recorded, 42)]);
+        // …while Codex may hold another spelling (on macOS the temp dir is a
+        // /var → /private/var symlink; on Windows, RUNNER~1 vs runneradmin).
+        assert_eq!(page_for(&pages, &file.to_string_lossy()), Some(42));
+        assert_eq!(page_for(&pages, &dir.join("Other.pdf").to_string_lossy()), None);
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
