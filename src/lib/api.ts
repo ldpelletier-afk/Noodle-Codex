@@ -52,8 +52,10 @@ export async function retryThumbnails(folderPath: string, force = false): Promis
   return invoke<number>('retry_thumbnails', { folderPath, force })
 }
 
-/** Which app "Open PDF" uses: Skim when it's installed (falling back to the
- * system default otherwise), or always the user's default PDF app. */
+/** Which app "Open PDF" uses: the platform's page-tracking reader (Skim on
+ * macOS, SumatraPDF on Windows) when it's installed, falling back to the system
+ * default otherwise — or always the user's default PDF app. `'skim'` is kept
+ * as the stored value for the first choice so existing settings carry over. */
 export type PdfViewer = 'skim' | 'system'
 
 const PDF_VIEWER_KEY = 'codex_pdf_viewer'
@@ -70,8 +72,8 @@ export function setPdfViewer(viewer: PdfViewer): void {
   localStorage.setItem(PDF_VIEWER_KEY, viewer)
 }
 
-export async function isSkimInstalled(): Promise<boolean> {
-  return invoke<boolean>('is_skim_installed')
+export async function isTrackingReaderInstalled(): Promise<boolean> {
+  return invoke<boolean>('is_tracking_reader_installed')
 }
 
 /** Opens the PDF in the preferred viewer (see `getPdfViewer`), logs the open
@@ -168,7 +170,7 @@ export function onThumbnailReady(handler: (t: ThumbnailReady) => void): Promise<
   return listen<ThumbnailReady>('thumbnail-ready', e => handler(e.payload))
 }
 
-/** Fired when Codex saves the page you're on while you read in Skim. */
+/** Fired when Codex saves the page you read to in Skim or SumatraPDF. */
 export function onReadingProgress(handler: (doc: Document) => void): Promise<UnlistenFn> {
   return listen<Document>('reading-progress', e => handler(e.payload))
 }

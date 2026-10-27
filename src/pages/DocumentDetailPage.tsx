@@ -46,7 +46,7 @@ export function DocumentDetailPage() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [navigate])
 
-  // Page turns saved while reading this book in Skim.
+  // Pages saved while reading this book in Skim / SumatraPDF.
   useEffect(() => {
     const unlisten = onReadingProgress(d => {
       if (d.id === id) setDoc(d)

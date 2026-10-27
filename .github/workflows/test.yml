@@ -32,3 +32,7 @@ jobs:
       - run: npm run build
 
       - run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      # Page tracking on Windows goes through SumatraPDF; check the real thing.
+      - run: choco install sumatrapdf.install -y --no-progress
+      - run: cargo test --manifest-path src-tauri/Cargo.toml sumatra_end_to_end -- --ignored --nocapture

@@ -106,7 +106,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       refresh()
     })
 
-    // Reading in Skim: Codex saves each page turn as progress.
+    // Reading in Skim / SumatraPDF: Codex saves the page read to as progress.
     const unlistenReading = onReadingProgress(patchDocument)
 
     return () => {
