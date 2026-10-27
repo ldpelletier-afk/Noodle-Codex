@@ -1363,18 +1363,27 @@ fn perform_document_edit(
     // we still rename and save everything to Codex's own catalog, just
     // without updating this file's embedded metadata. The caller surfaces
     // this as a warning rather than blocking the save.
-    let pdf_warning = pdf::write_info_fields(&old_path, title, &author_field, &subject_field, &keywords_field)
-        .err()
-        .map(|e| format!("Saved to Codex, but couldn't update the PDF's own metadata: {e}"));
+    let mut warnings: Vec<String> = Vec::new();
+    if let Err(e) = pdf::write_info_fields(&old_path, title, &author_field, &subject_field, &keywords_field) {
+        warnings.push(format!("Saved to Codex, but couldn't update the PDF's own metadata: {e}."));
+    }
 
-    // Rename to match the new title, staying in the same folder.
+    // Rename to match the new title, staying in the same folder. Like the
+    // metadata write, a failed rename (on Windows: the file is open in
+    // another app) doesn't sink the edit — it's saved under the current name.
     let dir = old_path.parent().ok_or("PDF has no parent directory")?;
     let stem = pdf::sanitize_filename(title);
-    let final_path = pdf::unique_pdf_path(dir, &stem, &old_path);
+    let mut final_path = pdf::unique_pdf_path(dir, &stem, &old_path);
     if final_path != old_path {
-        std::fs::rename(&old_path, &final_path)
-            .map_err(|e| format!("metadata saved, but couldn't rename file: {e}"))?;
+        if let Err(e) = std::fs::rename(&old_path, &final_path) {
+            warnings.push(format!(
+                "Saved to Codex, but couldn't rename the file{}.",
+                pdf::io_failure_hint(&e)
+            ));
+            final_path = old_path.clone();
+        }
     }
+    let pdf_warning = (!warnings.is_empty()).then(|| warnings.join(" "));
 
     let new_id = pdf::doc_id(&final_path);
 
@@ -1441,10 +1450,10 @@ fn perform_document_edit(
 #[serde(rename_all = "camelCase")]
 pub struct UpdateDocumentResult {
     pub document: Document,
-    /// Set when the edit was saved to Codex's catalog (and the file renamed)
-    /// but the PDF's own embedded metadata couldn't be updated — e.g. an
-    /// encrypted or unusually-structured file that can't be safely rewritten.
-    /// `None` means the PDF's Info dictionary was updated too.
+    /// Set when the edit was saved to Codex but part of it couldn't be applied
+    /// to the file itself: its embedded metadata (an encrypted or
+    /// unusually-structured PDF) and/or its name (on Windows, typically
+    /// because it's open in another app). `None` means everything applied.
     pub pdf_warning: Option<String>,
 }
 
@@ -2009,6 +2018,75 @@ mod tests {
         assert!(base.join("New Title For Broken File.pdf").exists());
 
         std::fs::remove_dir_all(&base).ok();
+    }
+
+    /// Simulates the PDF being open in another app: on Windows, by holding it
+    /// open with no sharing (exactly what makes Acrobat-held files
+    /// unrenameable); on Unix, by making its folder read-only.
+    fn edit_while_file_is_unrenameable(test: &str) -> (Document, Option<String>, PathBuf, Vec<String>) {
+        let base = std::env::temp_dir().join(format!("codex_{test}_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let cache = base.join("cache");
+        std::fs::create_dir_all(&base).unwrap();
+        let original_path = base.join("old name.pdf");
+        pdf::build_test_pdf(&original_path, "Old Title", "", "", "", "D:20200101000000Z");
+        let existing = build_document(&original_path, &base.to_string_lossy(), "Papers");
+        let input = UpdateDocumentInput {
+            id: existing.id.clone(),
+            title: "New Title".to_string(),
+            authors: vec![],
+            year: None,
+            venue: None,
+            doi: None,
+            keywords: vec![],
+            subject: None,
+        };
+
+        #[cfg(windows)]
+        let lock = {
+            use std::os::windows::fs::OpenOptionsExt;
+            std::fs::OpenOptions::new().read(true).share_mode(0).open(&original_path).unwrap()
+        };
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&base, std::fs::Permissions::from_mode(0o555)).unwrap();
+        }
+
+        let (doc, warning) = perform_document_edit(&cache, &existing, input).unwrap();
+
+        #[cfg(windows)]
+        drop(lock);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&base, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let names: Vec<String> = std::fs::read_dir(&base)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .collect();
+        std::fs::remove_dir_all(&base).ok();
+        (doc, warning, original_path, names)
+    }
+
+    #[test]
+    fn perform_document_edit_keeps_the_edit_when_the_file_cant_be_renamed() {
+        let (doc, warning, original_path, _) = edit_while_file_is_unrenameable("edit_locked");
+        // Saved to Codex under the current file name, with the new title.
+        assert_eq!(doc.title, "New Title");
+        assert_eq!(doc.path, original_path.to_string_lossy());
+        let warning = warning.expect("a failed rename should surface a warning");
+        assert!(warning.contains("couldn't rename the file"), "{warning}");
+        #[cfg(windows)]
+        assert!(warning.contains("open in another app"), "{warning}");
+    }
+
+    #[test]
+    fn failed_pdf_rewrite_leaves_no_temp_file_behind() {
+        let (_, _, _, names) = edit_while_file_is_unrenameable("edit_locked_tmp");
+        assert_eq!(names, vec!["old name.pdf".to_string()], "only the original should remain");
     }
 
     #[test]

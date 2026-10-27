@@ -250,16 +250,31 @@ pub fn write_info_fields(
         }
     });
 
-    match verify_result {
-        Ok(()) => {
-            std::fs::rename(&tmp_path, path)
-                .map_err(|e| format!("verified, but couldn't replace original file: {e}"))?;
-            Ok(())
-        }
-        Err(e) => {
-            let _ = std::fs::remove_file(&tmp_path);
-            Err(e)
-        }
+    let result = verify_result.and_then(|()| {
+        std::fs::rename(&tmp_path, path)
+            .map_err(|e| format!("verified, but couldn't replace original file{}", io_failure_hint(&e)))
+    });
+    // Never leave the rewritten copy behind — on Windows a dot-prefixed name
+    // isn't hidden, so it would show up in the user's folder. (After a
+    // successful rename it's already gone.)
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp_path);
+    }
+    result
+}
+
+/// Explains a failed rename/replace in user terms. Windows refuses to rename
+/// or replace a file another app has open (Acrobat, Edge, …), which is by far
+/// the likeliest cause there; otherwise the OS's own message is passed on.
+pub fn io_failure_hint(e: &std::io::Error) -> String {
+    // 32 = ERROR_SHARING_VIOLATION, 33 = ERROR_LOCK_VIOLATION
+    let in_use = cfg!(windows)
+        && (matches!(e.raw_os_error(), Some(32) | Some(33))
+            || e.kind() == std::io::ErrorKind::PermissionDenied);
+    if in_use {
+        " because it's open in another app — close it there and try again".to_string()
+    } else {
+        format!(": {e}")
     }
 }
 
