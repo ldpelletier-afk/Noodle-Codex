@@ -1,6 +1,6 @@
 # Codex
 
-A macOS desktop app for browsing and organizing a personal PDF library:
+A desktop app for macOS and Windows for browsing and organizing a personal PDF library:
 real first-page thumbnails, BibTeX/Zotero metadata enrichment, reading
 progress tracking, and a live folder watcher that keeps the library in
 sync with your filesystem as you add, edit, and remove files. Manual
@@ -12,10 +12,12 @@ the backend, SQLite for the library index.
 
 ## Install (just want to use it)
 
-Grab the latest `.dmg` from [Releases](https://github.com/ldpelletier-afk/Noodle-Codex/releases),
-open it, and drag Codex.app to Applications.
+Download from the latest [Release](https://github.com/ldpelletier-afk/Noodle-Codex/releases/latest).
 
-Runs on both Apple Silicon (M-series) and Intel Macs.
+### Mac
+
+Grab the `.dmg`, open it, and drag Codex.app to Applications. Runs on both
+Apple Silicon (M-series) and Intel Macs.
 
 **First launch:** Codex isn't signed with an Apple Developer ID, so macOS
 blocks it the first time ("can't be opened" or "is damaged"). Either open
@@ -26,7 +28,18 @@ this once in Terminal:
 xattr -cr /Applications/Codex.app
 ```
 
-**PDF reader:** "Open PDF" uses [Skim](https://skim-app.sourceforge.io) if
+### Windows
+
+Grab the `..._x64-setup.exe` and run it. Requires Windows 10 or 11 (64-bit).
+
+**First launch:** Codex isn't code-signed, so Windows SmartScreen may show
+"Windows protected your PC". Click **More info**, then **Run anyway**.
+
+"Open PDF" opens files in your default PDF app (Edge, Acrobat, …).
+
+### PDF reader (Mac)
+
+"Open PDF" uses [Skim](https://skim-app.sourceforge.io) if
 it's installed (and reopens at the page you left off on), otherwise your
 default PDF app — Preview, Acrobat, whatever you've set in Finder. To always
 use your default app even with Skim installed, pick **My default PDF app**
@@ -37,7 +50,8 @@ A short walkthrough runs on first launch; replay it any time from
 
 ## Building from source
 
-Prerequisites:
+Prerequisites (Mac; on Windows, Visual Studio's "Desktop development with
+C++" workload replaces the Xcode tools):
 
 - [Node.js](https://nodejs.org) 20+
 - [Rust](https://www.rust-lang.org/tools/install) (stable toolchain)
