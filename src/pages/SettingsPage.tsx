@@ -23,7 +23,7 @@ import {
   detachBibtex,
   getBibtexStatus,
   getPdfViewer,
-  isSkimInstalled,
+  isTrackingReaderInstalled,
   pickBibtexFile,
   rematchBibtex,
   setPdfViewer,
@@ -31,7 +31,7 @@ import {
 } from '@/lib/api'
 import type { BibtexStatus } from '@/lib/types'
 import { TOUR_ENABLED, useTour } from '@/contexts/TourContext'
-import { IS_MAC, baseName } from '@/lib/platform'
+import { IS_MAC, TRACKING_READER, baseName } from '@/lib/platform'
 import { cn } from '@/lib/utils'
 
 const THEME_ICONS: Record<string, LucideIcon> = {
@@ -60,13 +60,13 @@ export function SettingsPage() {
   const [bibtex, setBibtex] = useState<BibtexStatus | null>(null)
   const [bibBusy, setBibBusy] = useState(false)
   const [viewer, setViewer] = useState<PdfViewer>(() => getPdfViewer())
-  const [skimInstalled, setSkimInstalled] = useState<boolean | null>(null)
+  const [readerInstalled, setReaderInstalled] = useState<boolean | null>(null)
   const { startTour } = useTour()
 
   useEffect(() => {
-    isSkimInstalled()
-      .then(setSkimInstalled)
-      .catch(() => setSkimInstalled(false))
+    isTrackingReaderInstalled()
+      .then(setReaderInstalled)
+      .catch(() => setReaderInstalled(false))
   }, [])
 
   function selectViewer(v: PdfViewer) {
@@ -271,47 +271,51 @@ export function SettingsPage() {
           </div>
         </Section>
 
-        {IS_MAC && (
-          <Section title="Opening PDFs" description="Which app “Open PDF” uses.">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {(
-                [
-                  {
-                    id: 'skim',
-                    label: 'Skim',
-                    detail:
-                      skimInstalled === false
+        <Section title="Opening PDFs" description="Which app “Open PDF” uses.">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {(
+              [
+                {
+                  id: 'skim',
+                  label: TRACKING_READER,
+                  detail:
+                    readerInstalled === false
+                      ? IS_MAC
                         ? 'Not installed — your default PDF app is used instead.'
-                        : 'Saves your page automatically as you read, and reopens there.',
-                  },
-                  {
-                    id: 'system',
-                    label: 'My default PDF app',
-                    detail: 'Preview, Acrobat, or whatever you’ve set in Finder.',
-                  },
-                ] as const
-              ).map(opt => {
-                const active = viewer === opt.id
-                return (
-                  <button
-                    key={opt.id}
-                    onClick={() => selectViewer(opt.id)}
-                    className={cn(
-                      'flex items-start gap-2 p-3 rounded-xl border transition-colors text-left',
-                      active ? 'border-primary ring-1 ring-primary bg-primary/5' : 'border-border hover:bg-muted'
-                    )}
-                  >
-                    <span className="flex-1">
-                      <span className="block text-sm font-medium">{opt.label}</span>
-                      <span className="block text-xs text-muted-foreground mt-0.5">{opt.detail}</span>
-                    </span>
-                    {active && <Check className="w-4 h-4 text-primary shrink-0 mt-0.5" />}
-                  </button>
-                )
-              })}
-            </div>
-          </Section>
-        )}
+                        : 'Not installed (free at sumatrapdfreader.org) — your default PDF app is used instead.'
+                      : IS_MAC
+                        ? 'Saves your page automatically as you read, and reopens there.'
+                        : 'Saves the page you close a book on, and reopens there.',
+                },
+                {
+                  id: 'system',
+                  label: 'My default PDF app',
+                  detail: IS_MAC
+                    ? 'Preview, Acrobat, or whatever you’ve set in Finder.'
+                    : 'Edge, Acrobat, or whatever you’ve set in Windows.',
+                },
+              ] as const
+            ).map(opt => {
+              const active = viewer === opt.id
+              return (
+                <button
+                  key={opt.id}
+                  onClick={() => selectViewer(opt.id)}
+                  className={cn(
+                    'flex items-start gap-2 p-3 rounded-xl border transition-colors text-left',
+                    active ? 'border-primary ring-1 ring-primary bg-primary/5' : 'border-border hover:bg-muted'
+                  )}
+                >
+                  <span className="flex-1">
+                    <span className="block text-sm font-medium">{opt.label}</span>
+                    <span className="block text-xs text-muted-foreground mt-0.5">{opt.detail}</span>
+                  </span>
+                  {active && <Check className="w-4 h-4 text-primary shrink-0 mt-0.5" />}
+                </button>
+              )
+            })}
+          </div>
+        </Section>
 
         {TOUR_ENABLED && (
           <Section title="Walkthrough" description="A quick five-step tour of the basics.">

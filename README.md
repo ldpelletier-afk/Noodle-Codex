@@ -35,7 +35,10 @@ Grab the `..._x64-setup.exe` and run it. Requires Windows 10 or 11 (64-bit).
 **First launch:** Codex isn't code-signed, so Windows SmartScreen may show
 "Windows protected your PC". Click **More info**, then **Run anyway**.
 
-"Open PDF" opens files in your default PDF app (Edge, Acrobat, …).
+"Open PDF" uses [SumatraPDF](https://www.sumatrapdfreader.org) if it's
+installed — reopening each book at your saved page and saving the page you
+close it on as your progress — otherwise your default PDF app (Edge,
+Acrobat, …). Choose under **Settings → Opening PDFs**.
 
 ### PDF reader (Mac)
 

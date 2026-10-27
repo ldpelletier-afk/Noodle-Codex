@@ -2,6 +2,7 @@ use crate::bib::BibIndex;
 use crate::db::{self, Db};
 use crate::model::{Document, Folder, ScanProgress};
 use crate::pdf;
+use crate::sumatra;
 use crate::thumb;
 use chrono::{DateTime, Local, Utc};
 use serde::{Deserialize, Serialize};
@@ -801,6 +802,7 @@ fn status_state(
 /// its own `try` so a bad page number (or anything else about the jump)
 /// can't stop the document from opening — the caller only needs to know
 /// whether Skim accepted the open itself.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn skim_open_at_page_script(path: &str, page: u32) -> String {
     let escaped = path.replace('\\', "\\\\").replace('"', "\\\"");
     format!(
@@ -817,6 +819,7 @@ end tell"#
 /// Opens `path` in Skim at `page` via AppleScript. Returns false if Skim
 /// isn't installed/scriptable or the open itself fails, so the caller can
 /// fall back to the plain opener.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn open_in_skim_at_page(path: &str, page: u32) -> bool {
     std::process::Command::new("osascript")
         .arg("-e")
@@ -827,6 +830,7 @@ fn open_in_skim_at_page(path: &str, page: u32) -> bool {
 }
 
 /// What Skim reports for one document when polled.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 #[derive(Debug, PartialEq)]
 enum SkimPage {
     Page(u32),
@@ -840,6 +844,7 @@ enum SkimPage {
 /// AppleScript returning the 1-based current page of the Skim document at
 /// `path`, or "notopen" / "notrunning". The `is running` check keeps a poll
 /// from relaunching Skim after the reader quits it.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn skim_current_page_script(path: &str) -> String {
     let escaped = path.replace('\\', "\\\\").replace('"', "\\\"");
     format!(
@@ -857,6 +862,7 @@ return "notrunning""#
     )
 }
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn parse_skim_page(output: &str) -> SkimPage {
     match output.trim() {
         "notopen" => SkimPage::NotOpen,
@@ -864,6 +870,7 @@ fn parse_skim_page(output: &str) -> SkimPage {
     }
 }
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn query_skim_page(path: &str) -> SkimPage {
     match std::process::Command::new("osascript")
         .arg("-e")
@@ -877,12 +884,14 @@ fn query_skim_page(path: &str) -> SkimPage {
 
 /// Document ids with a Skim tracker running, so reopening a book that's
 /// already being tracked doesn't start a second poller.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn active_skim_trackers() -> &'static Mutex<HashSet<String>> {
     static TRACKERS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
     TRACKERS.get_or_init(|| Mutex::new(HashSet::new()))
 }
 
 /// Removes the tracker's id on exit, including on panic.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 struct SkimTrackerGuard(String);
 
 impl Drop for SkimTrackerGuard {
@@ -897,12 +906,14 @@ impl Drop for SkimTrackerGuard {
 const SKIM_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(3);
 /// How long to wait for Skim to finish loading a just-opened document before
 /// concluding it isn't going to show up.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 const SKIM_OPEN_GRACE_POLLS: u32 = 10;
 
 /// Follows a document opened in Skim and saves the page the reader is on as
 /// their progress, until they close it (or quit Skim). Saving on every page
 /// change, rather than only at close, means nothing is lost if Codex quits
 /// first. Each save emits `reading-progress` with the updated document.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn spawn_skim_tracker(app: AppHandle, id: String, path: String, saved_page: u32) {
     if !active_skim_trackers()
         .lock()
@@ -966,18 +977,130 @@ fn skim_installed() -> bool {
         .unwrap_or(false)
 }
 
-/// Lets the Settings page show whether the Skim option will actually apply.
+/// Whether the platform's page-tracking reader (Skim on macOS, SumatraPDF on
+/// Windows) is installed, so Settings can show whether that option applies.
 #[tauri::command]
-pub fn is_skim_installed() -> bool {
-    skim_installed()
+pub fn is_tracking_reader_installed() -> bool {
+    skim_installed() || sumatra::find_exe().is_some()
+}
+
+/// Opens `doc` in the platform's page-tracking reader at its saved page and
+/// starts following the page read to. Returns false when no such reader is
+/// installed (or it failed to open), so the caller falls back to the default
+/// app. A finished book stays finished: paging back through it to re-read or
+/// look something up shouldn't flip it back to "reading", so it isn't tracked.
+#[cfg(target_os = "macos")]
+fn open_in_tracking_reader(app: &AppHandle, doc: &Document) -> bool {
+    use tauri_plugin_opener::OpenerExt;
+    if !skim_installed() {
+        return false;
+    }
+    let has_saved_page = doc.current_page > 0 && doc.page_count > 0;
+    let opened = (has_saved_page && open_in_skim_at_page(&doc.path, doc.current_page.min(doc.page_count)))
+        || app.opener().open_path(&doc.path, Some("Skim")).is_ok();
+    if opened && doc.status != "completed" {
+        spawn_skim_tracker(app.clone(), doc.id.clone(), doc.path.clone(), doc.current_page);
+    }
+    opened
+}
+
+#[cfg(windows)]
+fn open_in_tracking_reader(app: &AppHandle, doc: &Document) -> bool {
+    let Some(exe) = sumatra::find_exe() else { return false };
+    let page = if doc.page_count > 0 { doc.current_page.min(doc.page_count) } else { 0 };
+    let opened = sumatra::open_at_page(&exe, &doc.path, page);
+    if opened && doc.status != "completed" {
+        if let Some(settings) = sumatra::settings_file(&exe) {
+            track_in_sumatra(app.clone(), doc.id.clone(), doc.path.clone(), settings);
+        }
+    }
+    opened
+}
+
+#[cfg(not(any(target_os = "macos", windows)))]
+fn open_in_tracking_reader(_app: &AppHandle, _doc: &Document) -> bool {
+    false
+}
+
+/// Documents opened in SumatraPDF this session: id → (path, when it was
+/// opened). One background thread serves them all.
+#[cfg(windows)]
+fn sumatra_tracked() -> &'static Mutex<std::collections::HashMap<String, (String, std::time::SystemTime)>> {
+    static TRACKED: OnceLock<Mutex<std::collections::HashMap<String, (String, std::time::SystemTime)>>> =
+        OnceLock::new();
+    TRACKED.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+}
+
+/// Sumatra writes its settings the moment a file opens — with the page it
+/// opened on *before* jumping to the one requested (seen in testing as page 1).
+/// Writes this soon after opening a document are ignored for that document.
+#[cfg(windows)]
+const SUMATRA_OPEN_SETTLE: std::time::Duration = std::time::Duration::from_secs(8);
+
+/// Follows a document opened in SumatraPDF: whenever Sumatra rewrites its
+/// settings file (on open, and when a file is closed), the page it recorded
+/// for this document is saved as reading progress if it differs from Codex's,
+/// emitting `reading-progress`. Tracking lasts for the session; the watcher
+/// only checks the settings file's timestamp every few seconds.
+#[cfg(windows)]
+fn track_in_sumatra(app: AppHandle, id: String, path: String, settings: PathBuf) {
+    sumatra_tracked()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .insert(id, (path, std::time::SystemTime::now()));
+
+    static STARTED: OnceLock<()> = OnceLock::new();
+    if STARTED.set(()).is_err() {
+        return; // the watcher is already running
+    }
+    std::thread::spawn(move || {
+        let mut last_seen: Option<std::time::SystemTime> = None;
+        loop {
+            std::thread::sleep(SKIM_POLL_INTERVAL);
+            let Ok(modified) = std::fs::metadata(&settings).and_then(|m| m.modified()) else { continue };
+            if last_seen == Some(modified) {
+                continue;
+            }
+            last_seen = Some(modified);
+            let Ok(text) = std::fs::read_to_string(&settings) else { continue };
+            let pages = sumatra::parse_saved_pages(&text);
+
+            let tracked: Vec<(String, String, std::time::SystemTime)> = sumatra_tracked()
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .iter()
+                .map(|(id, (path, opened))| (id.clone(), path.clone(), *opened))
+                .collect();
+            for (id, path, opened_at) in tracked {
+                if modified < opened_at + SUMATRA_OPEN_SETTLE {
+                    continue;
+                }
+                let Some(&page) = pages.get(&path.to_lowercase()) else { continue };
+                let db = app.state::<Db>();
+                let Ok(conn) = db.0.lock() else { continue };
+                match db::get_document(&conn, &id) {
+                    Ok(Some(doc)) if doc.status != "completed" && doc.current_page != page => {
+                        if let Ok(updated) = apply_reading_progress(&conn, &id, page) {
+                            let _ = app.emit("reading-progress", updated);
+                        }
+                    }
+                    Ok(Some(_)) => {}
+                    // Removed from the library (or renamed to a new id).
+                    _ => {
+                        sumatra_tracked().lock().unwrap_or_else(|p| p.into_inner()).remove(&id);
+                    }
+                }
+            }
+        }
+    });
 }
 
 /// Opens the PDF and logs the open as reading activity; for an unread
 /// document, also marks it as started. `viewer` picks the app:
-/// - `"skim"` (the default): Skim if it's installed — a consistent reading
-///   experience Codex can eventually hook into for in-app tracking — jumping
-///   straight to the saved page when there is one. Falls back to the system
-///   default viewer when Skim isn't installed.
+/// - `"skim"` (the default; the name predates Windows support): the
+///   platform's page-tracking reader if it's installed — Skim on macOS,
+///   SumatraPDF on Windows — opened at the saved page, with the page you read
+///   to saved back as progress. Falls back to the system default viewer.
 /// - `"system"`: always the user's default PDF app (Preview, Acrobat, …).
 #[tauri::command]
 pub fn open_document(
@@ -992,19 +1115,9 @@ pub fn open_document(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Document not found".to_string())?;
 
-    let use_skim = viewer.as_deref() != Some("system") && skim_installed();
-    let opener = app.opener();
-    let has_saved_page = doc.current_page > 0 && doc.page_count > 0;
-    let opened_in_skim = use_skim
-        && ((has_saved_page
-            && open_in_skim_at_page(&doc.path, doc.current_page.min(doc.page_count)))
-            || opener.open_path(&doc.path, Some("Skim")).is_ok());
-    // A finished book stays finished: paging back through it to re-read or
-    // look something up shouldn't flip it back to "reading".
-    if opened_in_skim && doc.status != "completed" {
-        spawn_skim_tracker(app.clone(), doc.id.clone(), doc.path.clone(), doc.current_page);
-    } else if !opened_in_skim {
-        opener
+    let opened = viewer.as_deref() != Some("system") && open_in_tracking_reader(&app, &doc);
+    if !opened {
+        app.opener()
             .open_path(&doc.path, None::<&str>)
             .map_err(|e| e.to_string())?;
     }

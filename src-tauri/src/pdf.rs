@@ -324,6 +324,42 @@ pub fn io_failure_hint(e: &std::io::Error) -> String {
     }
 }
 
+/// Builds an `n`-page PDF ("Page 1", "Page 2", …) for tests that need to
+/// navigate between pages.
+#[cfg(test)]
+pub fn build_test_pdf_pages(path: &Path, n: u32) {
+    use lopdf::dictionary;
+    use lopdf::{Document, Object, Stream};
+
+    let mut doc = Document::with_version("1.5");
+    let pages_id = doc.new_object_id();
+    let font_id = doc.add_object(dictionary! {
+        "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica",
+    });
+    let resources_id = doc.add_object(dictionary! { "Font" => dictionary! { "F1" => font_id } });
+    let kids: Vec<Object> = (1..=n)
+        .map(|i| {
+            let content = format!("BT /F1 48 Tf 72 700 Td (Page {i}) Tj ET").into_bytes();
+            let content_id = doc.add_object(Stream::new(dictionary! {}, content));
+            doc.add_object(dictionary! {
+                "Type" => "Page",
+                "Parent" => pages_id,
+                "MediaBox" => vec![0.into(), 0.into(), 612.into(), 792.into()],
+                "Contents" => content_id,
+                "Resources" => resources_id,
+            })
+            .into()
+        })
+        .collect();
+    doc.objects.insert(
+        pages_id,
+        Object::Dictionary(dictionary! { "Type" => "Pages", "Kids" => kids, "Count" => n as i64 }),
+    );
+    let catalog_id = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id });
+    doc.trailer.set("Root", catalog_id);
+    doc.save(path).expect("save test pdf");
+}
+
 /// Builds a valid single-page PDF with the given Info fields, for tests and
 /// as a shared fixture builder. Uses lopdf so the output is guaranteed
 /// round-trippable by `extract_meta`.
@@ -448,6 +484,14 @@ mod tests {
         assert_eq!(sanitize_filename("  spaced   out  "), "spaced out");
         assert_eq!(sanitize_filename(""), "Untitled");
         assert_eq!(sanitize_filename("..."), "Untitled");
+    }
+
+    #[test]
+    fn build_test_pdf_pages_makes_the_requested_page_count() {
+        let path = std::env::temp_dir().join(format!("codex_pages_{}.pdf", std::process::id()));
+        build_test_pdf_pages(&path, 3);
+        assert_eq!(extract_meta(&path).page_count, 3);
+        std::fs::remove_file(&path).ok();
     }
 
     #[test]

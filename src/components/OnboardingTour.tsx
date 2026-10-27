@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react'
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, X } from 'lucide-react'
 import type { Document } from '@/lib/types'
 import { cn } from '@/lib/utils'
-import { IS_MAC } from '@/lib/platform'
 
 type Side = 'top' | 'bottom' | 'left' | 'right'
 
@@ -48,9 +47,7 @@ export const TOUR_STEPS: TourStep[] = [
   {
     targets: ['open-pdf'],
     title: 'Open a PDF',
-    body: IS_MAC
-      ? 'Opens the file in your PDF reader. You can choose which app in Settings.'
-      : 'Opens the file in your default PDF reader.',
+    body: 'Opens the file in your PDF reader. You can choose which app in Settings.',
     fallback: 'Each book’s page has an “Open PDF” button that opens it in your PDF reader.',
     side: 'right',
     onRoute: p => p.startsWith('/documents/'),
