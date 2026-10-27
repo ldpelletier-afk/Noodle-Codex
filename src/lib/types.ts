@@ -109,9 +109,10 @@ export interface UpdateDocumentInput {
 
 export interface UpdateDocumentResult {
   document: Document
-  /** Set when the edit was saved to Codex (and the file renamed) but the
-   * PDF's own embedded metadata couldn't be updated — e.g. an encrypted or
-   * unusually-structured file. `null` means the PDF was updated too. */
+  /** Set when the edit was saved to Codex but part of it couldn't be applied
+   * to the file itself: its embedded metadata (an encrypted or
+   * unusually-structured PDF) and/or its name (on Windows, typically because
+   * it's open in another app). `null` means everything applied. */
   pdfWarning: string | null
 }
 
