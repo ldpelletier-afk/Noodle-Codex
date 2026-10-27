@@ -1,7 +1,7 @@
 # Review: Windows support (v0.3.0)
 
 Reviewed: the Windows-support changes (`1481aac`, `1c8984c`, `69f0f75`) plus the
-existing code they depend on. Fixes landed in v0.3.1.
+existing code they depend on. Fixes landed in v0.4.0 (two passes; see below).
 
 ## How it was checked
 
@@ -72,3 +72,70 @@ existing code they depend on. Fixes landed in v0.3.1.
   folder picker with consistent casing, so this shouldn't arise in practice.
 - The app itself hasn't been run interactively on Windows — only the test
   suite and the release build. A first real-world try is the remaining check.
+
+## Second pass: feature parity with macOS
+
+Went through every command the app exposes (20) and every screen, asking
+"does this do the same thing on Windows?".
+
+| Feature | Windows |
+|---|---|
+| Add / scan / remove folders, live folder watcher | Same |
+| Cover thumbnails, retry | Same (Windows PDF engine) |
+| BibTeX attach, match, export, copy | Same |
+| Edit metadata, write into PDF, rename file | Same after fixes 6–7 below |
+| Open PDF, show in File Explorer | Same |
+| Manual progress, Currently reading, Insights, themes, walkthrough, shortcuts | Same (frontend only) |
+| Automatic page tracking | **Was macOS-only** (Skim) — fixed in 8 below |
+
+### Fixed
+
+6. **Case-only renames made a duplicate name (macOS and Windows).** Renaming
+   "paper" to "Paper" produced `Paper (2).pdf`: on case-insensitive file
+   systems `Paper.pdf` exists (it *is* `paper.pdf`), and the path comparison
+   was case-sensitive. The existing file is now recognised as the same file
+   (inode on macOS, resolved path on Windows). Test:
+   `unique_pdf_path_allows_a_case_only_rename`.
+
+7. **Windows device names.** Titles such as "Con", "Nul. A study" or "COM1"
+   can't be file names on Windows, so the rename failed. They now get an
+   underscore (`Con_.pdf`), on every OS so files stay portable. Test:
+   `sanitize_filename_avoids_windows_reserved_names`.
+
+8. **Automatic page tracking on Windows, via SumatraPDF.** Skim doesn't exist
+   on Windows. Before building on Sumatra, its behaviour was probed on a
+   Windows runner:
+   - `-reuse-instance -page N` opens a file (or moves an open one) to page N;
+   - Sumatra writes `%LOCALAPPDATA%\SumatraPDF\SumatraPDF-settings.txt` when a
+     file opens and again when it's closed, with a `FilePath` / `PageNo` pair
+     per file;
+   - the write made on open records the page it opened on *before* jumping
+     (page 1), so Codex ignores writes in the first 8 s after opening a book.
+
+   "Open PDF" now uses Sumatra when installed (Settings shows the choice on
+   both platforms) and saves the page you close a book on as progress. Unlike
+   Skim, progress updates when the book is closed rather than on every page
+   turn — Sumatra doesn't report the page while a file is open.
+
+9. **Sumatra stores the long path.** The live test caught Sumatra recording
+   `C:\Users\runneradmin\…` for a file Codex knew as `C:\Users\RUNNER~1\…`,
+   so the page wasn't found. Paths are now compared after resolving them on
+   disk when the text doesn't match. Test:
+   `page_for_matches_the_same_file_spelled_differently`.
+
+### Verification
+
+- macOS: 68 Rust tests pass.
+- Windows CI: 67 pass, plus `sumatra_end_to_end`, which installs SumatraPDF,
+  opens a 3-page PDF through Codex's own functions, jumps to page 3, closes
+  Sumatra and reads page 3 back.
+- Settings rendered in the browser preview with a Windows user agent: shows
+  the SumatraPDF option and Windows wording.
+
+### Still not covered
+
+- The Sumatra *watcher* (the background loop that applies saved pages) is
+  exercised only through its parts: parsing, path matching and opening are
+  tested live, the loop itself isn't.
+- Nobody has used the app interactively on a Windows PC yet.
+
