@@ -1,0 +1,28 @@
+# TEMPORARY experiment — removed after use. Learns where and how SumatraPDF
+# records the page a document was closed on.
+name: Sumatra probe
+on: workflow_dispatch
+jobs:
+  probe:
+    runs-on: windows-latest
+    steps:
+      - run: choco install sumatrapdf.install -y --no-progress
+      - run: pip install fpdf2
+      - shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Recurse -Filter SumatraPDF.exe -Path "$env:ProgramFiles","${env:ProgramFiles(x86)}","$env:LOCALAPPDATA" -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+          "EXE: $exe"
+          New-Item -ItemType Directory -Force "C:\probe dir" | Out-Null
+          python -c "from fpdf import FPDF; p=FPDF(); [ (p.add_page(), p.set_font('helvetica',size=40), p.cell(text=f'Page {i}')) for i in (1,2,3)]; p.output(r'C:\probe dir\Three Pages.pdf')"
+          "--- open at page 2, then close gracefully"
+          Start-Process $exe -ArgumentList '-reuse-instance','-page','2','"C:\probe dir\Three Pages.pdf"'
+          Start-Sleep 6
+          Get-Process SumatraPDF -ErrorAction SilentlyContinue | Select-Object Id,MainWindowTitle | Format-Table | Out-String
+          Get-Process SumatraPDF -ErrorAction SilentlyContinue | ForEach-Object { $_.CloseMainWindow() | Out-Null }
+          Start-Sleep 4
+          "still running after close: " + [bool](Get-Process SumatraPDF -ErrorAction SilentlyContinue)
+          "--- settings files"
+          Get-ChildItem -Recurse -Filter SumatraPDF-settings.txt -Path "$env:LOCALAPPDATA","$env:APPDATA",(Split-Path $exe) -ErrorAction SilentlyContinue | ForEach-Object {
+            "FILE: $($_.FullName)"
+            Get-Content $_.FullName | Select-String -Pattern 'FileStates|SessionData|FilePath|PageNo|ReuseInstance|UseTabs|RememberStatePerDocument' | ForEach-Object { "  $($_.Line)" }
+          }
